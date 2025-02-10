@@ -10,6 +10,11 @@ import multiprocessing as mp
 import traceback
 from discoverse.airbot_play import AirbotPlayFIK
 from discoverse import DISCOVERSE_ROOT_DIR, DISCOVERSE_ASSERT_DIR
+print(os.path.realpath(__file__))
+print(DISCOVERSE_ROOT_DIR)
+print(DISCOVERSE_ASSERT_DIR)
+DISCOVERSE_ROOT_DIR = "/home/sfw/project/pythonproject/CONTINUAL-LEARNING-DISCOVERSE"
+DISCOVERSE_ASSERT_DIR = "/home/sfw/project/pythonproject/CONTINUAL-LEARNING-DISCOVERSE/models"
 from discoverse.envs.airbot_play_base import AirbotPlayCfg
 from discoverse.utils import get_body_tmat, get_site_tmat, step_func, SimpleStateMachine
 from discoverse.task_base import AirbotPlayTaskBase, recoder_airbot_play
@@ -75,7 +80,7 @@ cfg.gs_model_dict["block_purple6"] = "object/block_purple_es.ply"
 # cfg.gs_model_dict["right"] = "my_airbot_play/right.ply"
 
 
-cfg.mjcf_file_path = "mjcf/tasks_airbot_play/block_bridge_place.xml"
+cfg.mjcf_file_path = "mjcf/tasks_airbot_play/block_bridge_place1.xml"
 cfg.obj_list     = ["bridge1","bridge2","block1_green","block2_green", "block_purple1", "block_purple2", "block_purple3", "block_purple4", "block_purple5", "block_purple6"]
 # cfg.obj_list     = ["bridge1","bridge2","block1_green","block2_green"]
 # cfg.obj_list     = ["bridge1","bridge2"]
