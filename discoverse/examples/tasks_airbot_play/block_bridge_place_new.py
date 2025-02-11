@@ -55,10 +55,12 @@ class SimNode(AirbotPlayTaskBase):
             self.mj_model.body_mass[body_id] = random_mass
 
 
+            # 2. 随机化质心
+            com_pos_range = 0.001 # 质心偏移范围 ±0.001 米
+            self.mj_model.body_ipos[body_id] = self.original_ipos[body_name] + np.random.uniform(-com_pos_range, com_pos_range, size=3)
+            # print("body_name: ", body_name, "com_pos: ", self.mj_model.body_ipos[body_id])
 
-
-
-            # 2. 随机化摩擦系数 (只随机化滑动摩擦 friction_slide)
+            # 3. 随机化摩擦系数 (只随机化滑动摩擦 friction_slide)
             friction_range_ratio_lower = 0.8 # 摩擦系数随机范围 ±50%
             friction_range_ratio_upper = 1.3 # 摩擦系数随机范围 ±50%
             rollfriction_range_ratio_lower = 0.75 # 滚动摩擦系数随机范围 ±50%
@@ -77,12 +79,6 @@ class SimNode(AirbotPlayTaskBase):
                 self.mj_model.geom_friction[self.mj_model.body_geomadr[body_id] + geom_idx][2] = random_friction3 # 修改滚动摩擦
 
 
-            # 3. 随机化质心 (通过轻微随机偏移 geom 位置)
-            com_pos_range = 0.0005 # 质心偏移范围 ±0.001 米
-            for geom_idx in range(len(self.original_geom_pos[body_name])):
-                original_geom_pos = self.original_geom_pos[body_name][geom_idx]
-                random_pos_offset = np.random.uniform(-com_pos_range, com_pos_range, size=3)
-                self.mj_model.geom_pos[self.mj_model.body_geomadr[body_id] + geom_idx] = original_geom_pos + random_pos_offset
         # 随机 2个绿色长方体位置
 
         for z in range(2):
