@@ -1,7 +1,7 @@
 <mujoco model="block_bridge_place">
   <compiler eulerseq="xyz"/>
 
-  <include file="../scene.xml"/>
+  <include file="../scene1.xml"/>
   <include file="../airbot_play/airbot_play_options.xml"/>
   <include file="../airbot_play/airbot_play_dependencies.xml"/>
   <compiler meshdir="../../meshes/" texturedir="../../textures/"/>
@@ -19,7 +19,7 @@
   </default>
 
   <worldbody>
-    <include file="../lab3_env.xml"/>
+    <include file="../lab3_env1.xml"/>
     <!-- ======= AITBOT PLAY ======= -->
     <body name="arm_pose" pos="0 0.65 0.78" euler="0 0 -1.5707963">
       <include file="../airbot_play/airbot_play.xml"/>

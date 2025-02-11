@@ -2,7 +2,7 @@
   <asset>
     <!-- <texture name="grid" type="2d" builtin="checker" rgb1=".9 .8 .7" rgb2=".4 .4 .4" width="300" height="300" mark="edge" markrgb=".2 .3 .4"/> -->
     <!-- <texture name="grid" type="2d" builtin="checker" rgb1=".8 .8 .8" rgb2=".6 .6 .6" width="300" height="300" mark="edge" markrgb=".2 .3 .4"/> -->
-    <texture name="grid" type="2d" file="/home/hdl/DISCOVERSE/models/textures/floor.png" width="300" height="300"/>
+    <texture name="grid" type="2d" file="../textures/floor.png" width="300" height="300"/>
     <!-- <material name="grid" texture="grid" texrepeat="2 2" texuniform="true" reflectance=".2"/> -->
     <material name="grid" texture="grid" texrepeat="2 2" texuniform="true" reflectance="0"/>
   </asset>
