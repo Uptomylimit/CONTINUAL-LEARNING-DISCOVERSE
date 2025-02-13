@@ -25,20 +25,17 @@ class SimNode(AirbotPlayTaskBase):
         # 存储原始的动力学参数，用于设定随机化范围
         self.original_mass = {}
         self.original_friction = {}
-        self.original_geom_pos = {} # 存储 geom 的原始 pos
+        self.original_ipos = {} # 存储 geom 的原始 pos
 
         for body_name in self.block_body_names:
             body_id = self.mj_model.body(body_name).id
             self.original_mass[body_name] = self.mj_model.body_mass[body_id].copy()
+            self.original_ipos[body_name] = self.mj_model.body_ipos[body_id].copy()
             self.original_friction[body_name] = []
-            self.original_geom_pos[body_name] = []
 
             for geom_id in range(self.mj_model.body_geomnum[body_id]):
                 geom_friction = self.mj_model.geom_friction[self.mj_model.body_geomadr[body_id] + geom_id].copy()
                 self.original_friction[body_name].append(geom_friction)
-
-                geom_pos = self.mj_model.geom_pos[self.mj_model.body_geomadr[body_id] + geom_id].copy()
-                self.original_geom_pos[body_name].append(geom_pos)
 
 
     def domain_randomization(self):
