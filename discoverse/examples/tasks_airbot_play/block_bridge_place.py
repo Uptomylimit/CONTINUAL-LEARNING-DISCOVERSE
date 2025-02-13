@@ -10,11 +10,6 @@ import multiprocessing as mp
 import traceback
 from discoverse.airbot_play import AirbotPlayFIK
 from discoverse import DISCOVERSE_ROOT_DIR, DISCOVERSE_ASSERT_DIR
-print(os.path.realpath(__file__))
-print(DISCOVERSE_ROOT_DIR)
-print(DISCOVERSE_ASSERT_DIR)
-DISCOVERSE_ROOT_DIR = "/home/sfw/project/pythonproject/CONTINUAL-LEARNING-DISCOVERSE"
-DISCOVERSE_ASSERT_DIR = "/home/sfw/project/pythonproject/CONTINUAL-LEARNING-DISCOVERSE/models"
 from discoverse.envs.airbot_play_base import AirbotPlayCfg
 from discoverse.utils import get_body_tmat, get_site_tmat, step_func, SimpleStateMachine
 from discoverse.task_base import AirbotPlayTaskBase, recoder_airbot_play

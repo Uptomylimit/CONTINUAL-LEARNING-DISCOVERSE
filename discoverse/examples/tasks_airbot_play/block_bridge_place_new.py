@@ -25,7 +25,7 @@ class SimNode(AirbotPlayTaskBase):
         # 存储原始的动力学参数，用于设定随机化范围
         self.original_mass = {}
         self.original_friction = {}
-        self.original_ipos = {} # 存储 geom 的原始 pos
+        self.original_ipos = {} 
 
         for body_name in self.block_body_names:
             body_id = self.mj_model.body(body_name).id
