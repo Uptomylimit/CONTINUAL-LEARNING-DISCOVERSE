@@ -19,25 +19,26 @@ class SimNode(AirbotPlayTaskBase):
     def __init__(self, config: AirbotPlayCfg):
         super().__init__(config)
         self.camera_1_pose = (self.mj_model.camera("eye_side").pos.copy(), self.mj_model.camera("eye_side").quat.copy())
+
         # 获取需要随机化的积木块 body 名称列表
         self.block_body_names = ["block1_green", "block2_green", "block_purple1", "block_purple2", "block_purple3", "block_purple4", "block_purple5", "block_purple6"]
+
         # 存储原始的动力学参数，用于设定随机化范围
         self.original_mass = {}
         self.original_friction = {}
-        self.original_geom_pos = {} # 存储 geom 的原始 pos
+        self.original_ipos = {} 
 
         for body_name in self.block_body_names:
             body_id = self.mj_model.body(body_name).id
             self.original_mass[body_name] = self.mj_model.body_mass[body_id].copy()
+            self.original_ipos[body_name] = self.mj_model.body_ipos[body_id].copy()
             self.original_friction[body_name] = []
-            self.original_geom_pos[body_name] = []
 
             for geom_id in range(self.mj_model.body_geomnum[body_id]):
                 geom_friction = self.mj_model.geom_friction[self.mj_model.body_geomadr[body_id] + geom_id].copy()
                 self.original_friction[body_name].append(geom_friction)
 
-                geom_pos = self.mj_model.geom_pos[self.mj_model.body_geomadr[body_id] + geom_id].copy()
-                self.original_geom_pos[body_name].append(geom_pos)
+
     def domain_randomization(self):
 
         # --- 随机化积木块动力学参数 ---
@@ -52,14 +53,16 @@ class SimNode(AirbotPlayTaskBase):
             self.mj_model.body_mass[body_id] = random_mass
 
 
+            # 2. 随机化质心
+            com_pos_range = 0.001 # 质心偏移范围 ±0.001 米
+            self.mj_model.body_ipos[body_id] = self.original_ipos[body_name] + np.random.uniform(-com_pos_range, com_pos_range, size=3)
+            # print("body_name: ", body_name, "com_pos: ", self.mj_model.body_ipos[body_id])
 
-
-
-            # 2. 随机化摩擦系数 (只随机化滑动摩擦 friction_slide)
+            # 3. 随机化摩擦系数 (只随机化滑动摩擦 friction_slide)
             friction_range_ratio_lower = 0.8 # 摩擦系数随机范围 ±50%
             friction_range_ratio_upper = 1.3 # 摩擦系数随机范围 ±50%
-            rollfriction_range_ratio_lower = 0.75 # 摩擦系数随机范围 ±50%
-            rollfriction_range_ratio_upper = 2.0 # 摩擦系数随机范围 ±50%
+            rollfriction_range_ratio_lower = 0.75 # 滚动摩擦系数随机范围 ±50%
+            rollfriction_range_ratio_upper = 1.5  # 滚动摩擦系数随机范围 ±50%
             for geom_idx in range(len(self.original_friction[body_name])):
                 original_friction = self.original_friction[body_name][geom_idx]
                 min_friction = original_friction * friction_range_ratio_lower
@@ -69,18 +72,10 @@ class SimNode(AirbotPlayTaskBase):
                 min_friction = original_friction * rollfriction_range_ratio_lower
                 max_friction = original_friction * rollfriction_range_ratio_upper 
                 random_friction3 = np.random.uniform(min_friction[2], max_friction[2]) 
-
                 self.mj_model.geom_friction[self.mj_model.body_geomadr[body_id] + geom_idx][0] = random_friction # 修改静摩擦
                 self.mj_model.geom_friction[self.mj_model.body_geomadr[body_id] + geom_idx][1] = random_friction2 # 修改滑动摩擦
                 self.mj_model.geom_friction[self.mj_model.body_geomadr[body_id] + geom_idx][2] = random_friction3 # 修改滚动摩擦
 
-
-            # 3. 随机化质心 (通过轻微随机偏移 geom 位置)
-            com_pos_range = 0.001 # 质心偏移范围 ±0.001 米
-            for geom_idx in range(len(self.original_geom_pos[body_name])):
-                original_geom_pos = self.original_geom_pos[body_name][geom_idx]
-                random_pos_offset = np.random.uniform(-com_pos_range, com_pos_range, size=3)
-                self.mj_model.geom_pos[self.mj_model.body_geomadr[body_id] + geom_idx] = original_geom_pos + random_pos_offset
 
         # 随机 2个绿色长方体位置
 
@@ -96,10 +91,10 @@ class SimNode(AirbotPlayTaskBase):
 
         for z in range(6):
             self.mj_data.qpos[self.nj + 1 + 7 * 4 + z * 7 + 0] += (
-                2.0 * (np.random.random() - 0.5) * 0.001
+                10.0 * (np.random.random() - 0.5) * 0.001
             )
             self.mj_data.qpos[self.nj + 1 + 7 * 4 + z * 7 + 1] += (
-                2.0 * (np.random.random() - 0.5) * 0.001
+                10.0 * (np.random.random() - 0.5) * 0.001
             )
 
     def check_success(self):
@@ -161,7 +156,7 @@ if __name__ == "__main__":
         cfg.sync = False
 
 
-    save_dir = "/media/hdl/My_Passport/Tsinghua_air/data_create/state1"
+    save_dir = "/media/hdl/My_Passport/Tsinghua_air/data_create/state1__test"
 #   save_dir = os.path.join(DISCOVERSE_ROOT_DIR, "data/block_bridge_place_realtest")
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
@@ -215,7 +210,7 @@ if __name__ == "__main__":
                     tmat_tgt_local = tmat_armbase_2_world @ tmat_block1
                     sim_node.target_control[:6] = arm_fik.properIK(tmat_tgt_local[:3,3], trmat, sim_node.mj_data.qpos[:6])
                 elif stm.state_idx == 4: # 抓住长方体
-                    sim_node.target_control[6] = 0.29
+                    sim_node.target_control[6] = 0.1
                 elif stm.state_idx == 5: # 抓稳长方体
                     sim_node.delay_cnt = int(0.35/sim_node.delta_t)
                 elif stm.state_idx == 6: # 提起长方体
@@ -254,7 +249,7 @@ if __name__ == "__main__":
                     tmat_tgt_local = tmat_armbase_2_world @ tmat_block2
                     sim_node.target_control[:6] = arm_fik.properIK(tmat_tgt_local[:3,3], trmat, sim_node.mj_data.qpos[:6])
                 elif stm.state_idx == 15: # 抓住长方体
-                    sim_node.target_control[6] = 0.29
+                    sim_node.target_control[6] = 0.1
                 elif stm.state_idx == 16: # 抓稳长方体
                     sim_node.delay_cnt = int(0.35/sim_node.delta_t)
                 elif stm.state_idx == 17: # 提起长方体
