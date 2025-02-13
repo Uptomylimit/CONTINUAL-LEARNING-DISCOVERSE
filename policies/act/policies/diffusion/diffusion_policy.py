@@ -17,7 +17,7 @@ class DiffusionPolicy(nn.Module):
 
         self.camera_names = args_override['camera_names']
 
-        self.observation_horizon = args_override['observation_horizon'] ### TODO TODO TODO DO THIS
+        self.observation_horizon = args_override['observation_horizon']
         self.action_horizon = args_override['action_horizon'] # apply chunk size
         self.prediction_horizon = args_override['prediction_horizon'] # chunk size
         self.num_train_timesteps = args_override['num_train_timesteps']
