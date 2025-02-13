@@ -402,7 +402,7 @@ def load_data(config: LoadDataConfig):
         num_workers=num_workers_val,
         prefetch_factor=1,
     )
-    print(f"num_train_episodes: {len(train_indices)}")
+    
     return train_dataloader, val_dataloader, norm_stats
 
 

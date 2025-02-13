@@ -7,6 +7,7 @@ from robomimic.models.base_nets import ResNet18Conv, SpatialSoftmax
 from robomimic.algo.diffusion_policy import replace_bn_with_gn, ConditionalUnet1D
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 from diffusers.schedulers.scheduling_ddim import DDIMScheduler
+from diffusers.schedulers.scheduling_dpmsolver_multistep import DPMSolverMultistepScheduler
 from diffusers.training_utils import EMAModel
 
 
@@ -19,7 +20,9 @@ class DiffusionPolicy(nn.Module):
         self.observation_horizon = args_override['observation_horizon'] ### TODO TODO TODO DO THIS
         self.action_horizon = args_override['action_horizon'] # apply chunk size
         self.prediction_horizon = args_override['prediction_horizon'] # chunk size
+        self.num_train_timesteps = args_override['num_train_timesteps']
         self.num_inference_timesteps = args_override['num_inference_timesteps']
+        self.prediction_type = args_override['prediction_type']
         self.ema_power = args_override['ema_power']
         self.lr = args_override['lr']
         self.weight_decay = 0
@@ -70,15 +73,28 @@ class DiffusionPolicy(nn.Module):
         self.ema = ema
 
         # setup noise scheduler
-        self.noise_scheduler = DDIMScheduler(
-            num_train_timesteps=50,
-            beta_schedule='squaredcos_cap_v2',
-            clip_sample=True,
-            set_alpha_to_one=True,
-            steps_offset=0,
-            prediction_type='epsilon'
+        self.noise_scheduler = DDPMScheduler(
+            num_train_timesteps=args_override['num_train_timesteps'],
+            beta_schedule=args_override['beta_schedule'],
+            clip_sample=args_override['clip_sample'],
+            prediction_type=args_override['prediction_type'],
         )
 
+        self.noise_scheduler_sample = DDIMScheduler(
+            num_train_timesteps=args_override['num_train_timesteps'],
+            beta_schedule=args_override['beta_schedule'],
+            clip_sample=args_override['clip_sample'],
+            set_alpha_to_one=True,
+            steps_offset=0,
+            prediction_type=args_override['prediction_type'],
+        )
+        # other solvers
+        # self.noise_scheduler = DPMSolverMultistepScheduler(
+        #     num_train_timesteps=args_override['num_inference_timesteps'],
+        #     beta_schedule=args_override['squaredcos_cap_v2'],
+        #     clip_sample=args_override['clip_sample'],
+        #     prediction_type=args_override['epsilon'],
+        # )
         n_parameters = sum(p.numel() for p in self.parameters())
         print("number of parameters: %.2fM" % (n_parameters/1e6,))
 
@@ -104,11 +120,11 @@ class DiffusionPolicy(nn.Module):
             obs_cond = torch.cat(all_features + [qpos], dim=1)
 
             # sample noise to add to actions
-            noise = torch.randn(actions.shape, device=obs_cond.device)
+            noise = torch.randn(actions.shape, dtype=actions.dtype, device=obs_cond.device)
             
             # sample a diffusion iteration for each data point
             timesteps = torch.randint(
-                0, self.noise_scheduler.config.num_train_timesteps, 
+                0, self.num_train_timesteps, 
                 (B,), device=obs_cond.device
             ).long()
             
@@ -121,7 +137,11 @@ class DiffusionPolicy(nn.Module):
             noise_pred = nets['policy']['noise_pred_net'](noisy_actions, timesteps, global_cond=obs_cond)
             
             # L2 loss
-            all_l2 = F.mse_loss(noise_pred, noise, reduction='none')
+            if self.prediction_type == 'epsilon':
+                target = noise
+            elif self.prediction_type == 'sample':
+                target = actions
+            all_l2 = F.mse_loss(noise_pred, target, reduction='none')
             loss = (all_l2 * ~is_pad.unsqueeze(-1)).mean()
 
             loss_dict = {}
@@ -158,9 +178,9 @@ class DiffusionPolicy(nn.Module):
             naction = noisy_action
             
             # init scheduler
-            self.noise_scheduler.set_timesteps(self.num_inference_timesteps)
+            self.noise_scheduler_sample.set_timesteps(self.num_inference_timesteps)
 
-            for k in self.noise_scheduler.timesteps:
+            for k in self.noise_scheduler_sample.timesteps:
                 # predict noise
                 noise_pred = nets['policy']['noise_pred_net'](
                     sample=naction, 
@@ -169,7 +189,7 @@ class DiffusionPolicy(nn.Module):
                 )
 
                 # inverse diffusion step (remove noise)
-                naction = self.noise_scheduler.step(
+                naction = self.noise_scheduler_sample.step(
                     model_output=noise_pred,
                     timestep=k,
                     sample=naction

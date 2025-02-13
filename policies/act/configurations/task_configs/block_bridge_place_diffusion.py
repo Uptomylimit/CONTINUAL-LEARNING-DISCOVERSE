@@ -64,7 +64,12 @@ POLICY_CONFIG_DIFFUSION_DEFAULT = {
     'action_horizon': 8,
     'prediction_horizon': 16,
     'num_queries': 8,
+    # scheduler args
+    'num_train_timesteps': 1000,
     'num_inference_timesteps': 10,
+    'beta_schedule': 'squaredcos_cap_v2',
+    'prediction_type': 'epsilon',
+    'clip_sample': True,
     'ema_power': 0.75,
     "policy_class": "Diffusion", 
     "policy_maker": policy_maker,
