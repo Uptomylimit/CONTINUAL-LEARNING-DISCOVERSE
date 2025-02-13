@@ -71,6 +71,11 @@ def config_policy(args: dict):
             "num_queries": 1,
             "camera_names": camera_names,
         }
+    elif policy_class == "Diffusion":
+        policy_config = {
+            "lr": args["learning_rate"],
+            "camera_names": camera_names,
+        }
     else:
         policy_config = {}
     # update custom policy configs

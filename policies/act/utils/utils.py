@@ -31,6 +31,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
         data_indexes: dict,
         chunk_sizes: dict = None,
         action_bias: int = 1,
+        policy_class: str = "ACT"
     ):
         super().__init__()
         self.episode_ids = episode_ids
@@ -40,11 +41,12 @@ class EpisodicDataset(torch.utils.data.Dataset):
         self.action_indexes = data_indexes.get("action", None)
         self.observation_chunk_size = chunk_sizes.get("observation", None)
         self.action_chunk_size = chunk_sizes.get("action", None)
-        assert self.observation_chunk_size is None, "Not implemented"
+        # assert self.observation_chunk_size is None, "Not implemented"
         self.norm_stats = norm_stats.copy()
         self.augmentors = augmentors
         self.augment_images = augmentors.get("image", None)
         self.action_bias = action_bias
+        self.policy_class = policy_class
         if self.observation_indexes is not None:
             self.norm_stats["qpos_mean"] = self.norm_stats["qpos_mean"][
                 self.observation_indexes
@@ -97,14 +99,21 @@ class EpisodicDataset(torch.utils.data.Dataset):
                 qpos = qpos[self.observation_indexes]
             image_dict = dict()
             for cam_name in self.camera_names:
-                image_dict[cam_name] = root[f"/observations/images/{cam_name}"][
-                    start_ts
-                ]
+                if self.observation_chunk_size is not None and self.observation_chunk_size > 1:
+                    image_dict[cam_name] = root[f"/observations/images/{cam_name}"][
+                        start_ts + 1 - self.observation_chunk_size : start_ts + 1
+                    ]
+                else:
+                    image_dict[cam_name] = root[f"/observations/images/{cam_name}"][
+                        start_ts
+                    ]
             if compressed:
                 for cam_name in image_dict.keys():
                     import cv2
-
-                    decompressed_image = cv2.imdecode(image_dict[cam_name], 1)
+                    if self.observation_chunk_size is not None and self.observation_chunk_size > 1:
+                        decompressed_image = [cv2.imdecode(image, 1) for image in image_dict[cam_name]]
+                    else:
+                        decompressed_image = cv2.imdecode(image_dict[cam_name], 1)
                     image_dict[cam_name] = np.array(decompressed_image)
             # TODO: pass the chunk_size as a arg to load only the needed actions
             # get all actions after and including start_ts
@@ -140,8 +149,13 @@ class EpisodicDataset(torch.utils.data.Dataset):
         action_data = torch.from_numpy(padded_action).float()
         is_pad = torch.from_numpy(is_pad).bool()
 
+
         # channel last LABEL
-        image_data = torch.einsum("k h w c -> k c h w", image_data)
+        if self.observation_chunk_size is not None and self.observation_chunk_size > 1:
+            image_data = torch.einsum("k t h w c -> k t c h w", image_data)
+            image_data = image_data.reshape(-1, *image_data.shape[2:])
+        else:
+            image_data = torch.einsum("k h w c -> k c h w", image_data)
 
         # augment images
         if self.augment_images is not None and self.augment_images.activated:
@@ -152,9 +166,15 @@ class EpisodicDataset(torch.utils.data.Dataset):
         # TODO: will standardize image in the loss function, not good
         image_data = image_data / 255.0
         # standardize lowdim data
-        action_data = (action_data - self.norm_stats["action_mean"]) / self.norm_stats[
-            "action_std"
-        ]
+        if self.policy_class == 'Diffusion':
+            # normalize to [-1, 1]
+            action_data = ((action_data - self.norm_stats["action_min"]) / (self.norm_stats["action_max"] - self.norm_stats["action_min"])) * 2 - 1
+        else:
+            # normalize to mean 0 std 1
+            action_data = (action_data - self.norm_stats["action_mean"]) / self.norm_stats["action_std"]
+        # action_data = (action_data - self.norm_stats["action_mean"]) / self.norm_stats[
+        #     "action_std"
+        # ]
         qpos_data = (qpos_data - self.norm_stats["qpos_mean"]) / self.norm_stats[
             "qpos_std"
         ]
@@ -257,6 +277,7 @@ class LoadDataConfig(object):
     check_episodes: bool
     camera_names: list
     chunk_sizes: dict
+    policy_class: str
 
     def __post_init__(self):
         # change dataset_dir to absolute path
@@ -304,14 +325,20 @@ def get_norm_stats(dataset_dir, num_episodes, config: LoadDataConfig):
     action_std = np.std(all_action_data, 0)
     action_std = np.clip(action_std, 1e-2, np.inf)  # clipping
 
+    action_min = np.min(all_action_data, 0)
+    action_max = np.max(all_action_data, 0)
+
     # normalize qpos data
     qpos_mean = np.mean(all_qpos_data, 0)
     qpos_std = np.std(all_qpos_data, 0)
     qpos_std = np.clip(qpos_std, 1e-2, np.inf)  # clipping
 
+    eps = 0.0001
     stats = {
         "action_mean": action_mean,
         "action_std": action_std,
+        "action_min": action_min - eps,
+        "action_max": action_max + eps,
         "qpos_mean": qpos_mean,
         "qpos_std": qpos_std,
         "example_qpos": qpos,
@@ -348,6 +375,7 @@ def load_data(config: LoadDataConfig):
         },
         "chunk_sizes": config.chunk_sizes,
         "action_bias": 1,
+        "policy_class": config.policy_class
     }
     train_dataset = EpisodicDataset(train_indices, **ep_ds_config)
     val_dataset = EpisodicDataset(val_indices, **ep_ds_config)
@@ -374,7 +402,7 @@ def load_data(config: LoadDataConfig):
         num_workers=num_workers_val,
         prefetch_factor=1,
     )
-
+    print(f"num_train_episodes: {len(train_indices)}")
     return train_dataloader, val_dataloader, norm_stats
 
 

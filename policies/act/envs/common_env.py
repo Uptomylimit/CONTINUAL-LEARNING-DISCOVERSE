@@ -31,17 +31,18 @@ class CommonEnv:
         raise NotImplementedError
 
 
-def get_image(ts: dm_env.TimeStep, camera_names, mode=0):
-    # TODO: remove this function
-    images: dict = ts.observation["images"]
+def get_image(images: dict|List, camera_names, mode=0):
     if mode == 0:  # 输出拼接之后的张量图
         curr_images = []
-        for cam_name in camera_names:
-            assert (
-                cam_name in images
-            ), f"Camera {cam_name} not found in images {images.keys()}"
-            curr_image = rearrange(images[cam_name], "h w c -> c h w")
-            curr_images.append(curr_image)
+        if isinstance(images, dict):
+            images = [images]
+        for image in images:
+            for cam_name in camera_names:
+                assert (
+                    cam_name in image
+                ), f"Camera {cam_name} not found in images {image.keys()}"
+                curr_image = rearrange(image[cam_name], "h w c -> c h w")
+                curr_images.append(curr_image)
         curr_image = np.stack(curr_images, axis=0)
         curr_image = torch.from_numpy(curr_image / 255.0).float().cuda().unsqueeze(0)
     else:  # 输出独立的张量图（且每个是多维的）  # TODO: 修改为每个是一维的

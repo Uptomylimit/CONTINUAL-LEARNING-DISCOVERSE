@@ -98,6 +98,7 @@ POLICY_CONFIG_ACT_DEFAULT = {
     "chunk_size": 40,
     "hidden_dim": 512,
     "dim_feedforward": 3200,
+    "observation_chunk_size": 1,
     "temporal_agg": False,
     "num_queries": 40,  # the same as the chunk_size
     "enc_layers": 4,

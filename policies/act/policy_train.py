@@ -25,15 +25,28 @@ def main(args:dict):
     ckpt_dir = all_config['ckpt_dir']
     stats_path = all_config['stats_path']
     gpu_threshold = all_config.get('gpu_threshold', 10)
-
+    policy_class = all_config["policy_config"]["policy_class"]
     # 加载数据及统计信息
-    train_dataloader, val_dataloader, stats = load_data(
-        LoadDataConfig(
-            **all_config["load_data"],
-            camera_names=all_config["camera_names"],
-            chunk_sizes={"action": all_config["policy_config"]["chunk_size"]},
+    if policy_class == "Diffusion":
+        train_dataloader, val_dataloader, stats = load_data(
+            LoadDataConfig(
+                **all_config["load_data"],
+                camera_names=all_config["camera_names"],
+                chunk_sizes={"action": all_config["policy_config"]["prediction_horizon"],
+                             "observation": all_config["policy_config"]["observation_horizon"]},
+                policy_class=policy_class,
+            )
         )
-    )
+    elif policy_class == "ACT":    
+        train_dataloader, val_dataloader, stats = load_data(
+            LoadDataConfig(
+                **all_config["load_data"],
+                camera_names=all_config["camera_names"],
+                chunk_sizes={"action": all_config["policy_config"]["chunk_size"],
+                             "observation": all_config["policy_config"]["observation_chunk_size"]},
+                policy_class=policy_class,
+            )
+        )
     # 创建保存路径
     os.makedirs(ckpt_dir, exist_ok=True)
     stats_dir = os.path.dirname(stats_path)
@@ -105,9 +118,6 @@ def make_optimizer(policy):
 def forward_pass(data:torch.Tensor, policy):
     image_data, qpos_data, action_data, is_pad = data
     image_data, qpos_data, action_data, is_pad = image_data.cuda(), qpos_data.cuda(), action_data.cuda(), is_pad.cuda()
-    print(policy)
-    policy(qpos_data, image_data, action_data, is_pad)
-    print("c")
     # print("image_data.shape:", image_data.shape)
     return policy(qpos_data, image_data, action_data, is_pad)  # TODO remove None
 
@@ -142,6 +152,7 @@ def train_bc(train_dataloader, val_dataloader, config):
     pretrain_path = config["pretrain_ckpt_path"]
     policy_config["ckpt_path"] = pretrain_path
     policy = make_policy(policy_config, "train")
+    print(f'Policy: {policy}')
 
     # get epoch base
     epoch_base = get_epoch_base(pretrain_path, config["pretrain_epoch_base"])
@@ -176,7 +187,6 @@ def train_bc(train_dataloader, val_dataloader, config):
     for epoch in tqdm(range(epoch_base, num_epochs + epoch_base)):
         print(f'\nEpoch {epoch}')
         step = epoch - epoch_base + 1
-        print("1")
         # validation
         if step % config["validate_every"] == 0:
             print('validating')
@@ -198,7 +208,6 @@ def train_bc(train_dataloader, val_dataloader, config):
             for k, v in epoch_summary.items():
                 summary_string += f'{k}: {v.item():.3f} '
             print(summary_string)
-        print("2")
 
         # evaluation #TODO: 目前不支持训练过程中的评估
         if step % eval_every == 0:
@@ -207,22 +216,18 @@ def train_bc(train_dataloader, val_dataloader, config):
             ckpt_path = os.path.join(ckpt_dir, ckpt_name)
             torch.save(policy.state_dict(), ckpt_path)
             success, _ = eval_bc(config, ckpt_name, save_episode=True, num_rollouts=10)
-        print("3")
+
         # training
         policy.train()
-        print("4")
         optimizer.zero_grad()
         for batch_idx, data in enumerate(train_dataloader):
-            print("a")
             forward_dict = forward_pass(data, policy)
-            print('b')
             # backward
             loss = forward_dict['loss']
             loss.backward()
             optimizer.step()
             optimizer.zero_grad()
             train_history.append(detach_dict(forward_dict))
-        print("5")
         epoch_summary = compute_dict_mean(train_history[(batch_idx+1)*(epoch-epoch_base):(batch_idx+1)*(epoch-epoch_base+1)])
         epoch_train_loss = epoch_summary['loss']
         print(f'Train loss: {epoch_train_loss:.5f}')

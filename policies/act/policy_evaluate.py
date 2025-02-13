@@ -78,8 +78,16 @@ def eval_bc(config, ckpt_name, env: CommonEnv):
     policy_config: dict = config["policy_config"]
     state_dim = policy_config["state_dim"]
     action_dim = policy_config["action_dim"]
-    temporal_agg = policy_config["temporal_agg"]
-    num_queries = policy_config["num_queries"]  # i.e. chunk_size
+    policy_class = policy_config["policy_class"]
+    if policy_class == "Diffusion":
+        observation_horizon = policy_config["observation_horizon"]
+        Ta = policy_config["action_horizon"]
+        num_queries = policy_config["num_queries"]  # i.e. chunk_size
+        assert Ta == num_queries, "infer every Ta(num_queries) steps"
+    elif policy_class == "ACT":
+        temporal_agg = policy_config["temporal_agg"]
+        observation_horizon = policy_config["observation_chunk_size"]
+        num_queries = policy_config["num_queries"]  # i.e. chunk_size
     dt = 1 / config["fps"]
     image_mode = config.get("image_mode", 0)
     save_all = config.get("save_all", False)
@@ -142,6 +150,10 @@ def eval_bc(config, ckpt_name, env: CommonEnv):
             stats = pickle.load(f)
         pre_process = lambda s_qpos: (s_qpos - stats["qpos_mean"]) / stats["qpos_std"]
         post_process = lambda a: a * stats["action_std"] + stats["action_mean"]
+        if policy_class == 'Diffusion':
+            post_process = lambda a: ((a + 1) / 2) * (stats['action_max'] - stats['action_min']) + stats['action_min']
+        else:
+            post_process = lambda a: a * stats['action_std'] + stats['action_mean']
     else:
         pre_process = lambda s_qpos: s_qpos
         post_process = lambda a: a
@@ -192,31 +204,45 @@ def eval_bc(config, ckpt_name, env: CommonEnv):
             if hasattr(policy, "reset"):
                 policy.reset()
             try:
-                for t in tqdm(range(max_timesteps)):
+                for t in tqdm(range(max_timesteps + observation_horizon)):
                     start_time = time.time()
                     image_list.append(ts.observation["images"])
                     if showing_images:
                         show_images(ts)
                     # pre-process current observations
-                    curr_image = get_image(ts, camera_names, image_mode)
+                    if t < observation_horizon:
+                        continue
+                    t_ = t - observation_horizon
+                    if observation_horizon == 1:
+                        curr_image = get_image(ts.observation["images"], camera_names, image_mode)
+                    else:
+                        curr_image = get_image(image_list[-observation_horizon:], camera_names, image_mode)
                     qpos_numpy = np.array(ts.observation["qpos"])
-
                     logger.debug(f"raw qpos: {qpos_numpy}")
                     qpos = pre_process(qpos_numpy)  # normalize qpos
                     logger.debug(f"pre qpos: {qpos}")
                     qpos = torch.from_numpy(qpos).float().cuda().unsqueeze(0)
-                    qpos_history[:, t] = qpos
+                    qpos_history[:, t_] = qpos
 
                     logger.debug(f"observe time: {time.time() - start_time}")
                     start_time = time.time()
                     # wrap policy
-                    target_t = t % num_queries
-                    if temporal_agg or target_t == 0:
-                        # (1, chunk_size, 7) for act
-                        all_actions: torch.Tensor = policy(qpos, curr_image)
-                    all_time_actions[[t], t : t + num_queries] = all_actions
-                    index = 0 if temporal_agg else target_t
-                    raw_action = all_actions[:, index]
+                    raw_action = None
+                    target_t = t_ % num_queries
+                    if policy_class == "ACT":
+                        if temporal_agg or target_t == 0:
+                            # (1, chunk_size, 7) for act
+                            all_actions: torch.Tensor = policy(qpos, curr_image)
+                        all_time_actions[[t_], t_ : t_ + num_queries] = all_actions
+                        index = 0 if temporal_agg else target_t
+                        raw_action = all_actions[:, index]
+                    elif policy_class == "Diffusion":
+                        if target_t == 0:
+                            # (1, predicted_horizon, 7) for diffusion
+                            all_actions: torch.Tensor = policy(qpos, curr_image)
+                            all_actions = all_actions[:, :num_queries]
+                        all_time_actions[[t_], t_ : t_ + num_queries] = all_actions
+                        raw_action = all_actions[:, target_t]
 
                     # post-process predicted action
                     # dim: (1,7) -> (7,)
