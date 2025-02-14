@@ -100,9 +100,13 @@ class EpisodicDataset(torch.utils.data.Dataset):
             image_dict = dict()
             for cam_name in self.camera_names:
                 if self.observation_chunk_size is not None and self.observation_chunk_size > 1:
+                    start_index = max(0, start_ts - self.observation_chunk_size + 1)
+                    end_index = start_ts + 1
                     image_dict[cam_name] = root[f"/observations/images/{cam_name}"][
-                        start_ts + 1 - self.observation_chunk_size : start_ts + 1
+                        start_index : end_index
                     ]
+                    while(len(image_dict[cam_name]) < self.observation_chunk_size):
+                        image_dict[cam_name] = image_dict[cam_name][0] + image_dict[cam_name]
                 else:
                     image_dict[cam_name] = root[f"/observations/images/{cam_name}"][
                         start_ts
