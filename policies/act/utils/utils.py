@@ -106,7 +106,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
                         start_index : end_index
                     ]
                     while(len(image_dict[cam_name]) < self.observation_chunk_size):
-                        image_dict[cam_name] = np.concatenate([image_dict[cam_name][0], image_dict[cam_name]], axis=0)
+                        image_dict[cam_name] = np.concatenate([image_dict[cam_name][0][np.newaxis, :], image_dict[cam_name]], axis=0)
                 else:
                     image_dict[cam_name] = root[f"/observations/images/{cam_name}"][
                         start_ts
