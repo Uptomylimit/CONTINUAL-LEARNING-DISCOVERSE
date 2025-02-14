@@ -37,7 +37,7 @@ def main(args:dict):
                 policy_class=policy_class,
             )
         )
-    elif policy_class == "ACT":    
+    elif policy_class == "ACT":
         train_dataloader, val_dataloader, stats = load_data(
             LoadDataConfig(
                 **all_config["load_data"],

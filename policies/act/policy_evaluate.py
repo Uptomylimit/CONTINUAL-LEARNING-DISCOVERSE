@@ -241,8 +241,8 @@ def eval_bc(config, ckpt_name, env: CommonEnv):
                             # (1, predicted_horizon, 7) for diffusion
                             all_actions: torch.Tensor = policy(qpos, curr_image)
                             all_actions = all_actions[:, :num_queries]
-                        all_time_actions[[t_], t_ : t_ + num_queries] = all_actions
-                        raw_action = all_actions[:, target_t]
+                        all_time_actions[[t_], t_ : t_ + num_queries] = all_actions.to(torch.float32)
+                        raw_action = all_actions[:, target_t].to(torch.float32)
 
                     # post-process predicted action
                     # dim: (1,7) -> (7,)

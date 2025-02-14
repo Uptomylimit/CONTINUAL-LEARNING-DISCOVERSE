@@ -45,6 +45,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
         self.norm_stats = norm_stats.copy()
         self.augmentors = augmentors
         self.augment_images = augmentors.get("image", None)
+        self.processor = data_indexes["processor"]
         self.action_bias = action_bias
         self.policy_class = policy_class
         if self.observation_indexes is not None:
@@ -168,7 +169,11 @@ class EpisodicDataset(torch.utils.data.Dataset):
         # TODO: configure the data process in the config file
         # normalize image to [0, 1]
         # TODO: will standardize image in the loss function, not good
-        image_data = image_data / 255.0
+        if self.processor is not None:
+            # we will process the image in the model forward function
+            pass
+        else:
+            image_data = image_data / 255.0
         # standardize lowdim data
         if self.policy_class == 'Diffusion':
             # normalize to [-1, 1]
@@ -278,6 +283,7 @@ class LoadDataConfig(object):
     observation_slice: Optional[Union[List[tuple], tuple]]
     action_slice: Optional[Union[List[tuple], tuple]]
     augmentors: dict
+    processor: str
     check_episodes: bool
     camera_names: list
     chunk_sizes: dict
@@ -376,6 +382,7 @@ def load_data(config: LoadDataConfig):
             "camera_names": camera_names,
             "observation": config.observation_slice,
             "action": config.action_slice,
+            "processor": config.processor,
         },
         "chunk_sizes": config.chunk_sizes,
         "action_bias": 1,

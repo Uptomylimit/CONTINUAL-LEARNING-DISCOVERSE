@@ -178,6 +178,7 @@ TRAIN_CONFIG_DEFAULT = {
         "augmentors": {
             "image": None,  # augment_images,
         },
+        "processor": None,  # the processor for the data
         "check_episodes": True,  # check the existence of all episodes
         "num_workers_train": 1,
         "num_workers_validate": 1,

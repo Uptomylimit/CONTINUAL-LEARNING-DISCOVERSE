@@ -57,7 +57,7 @@ POLICY_MODEL_DEFAULT = {
     'state_adaptor': 'mlp2x_gelu',
     'pretrained_vision_encoder_name_or_path':'google/siglip-so400m-patch14-384',
     'img_token_dim': 1152,
-    'state_token_dim': 128,
+    'state_token_dim': 7,
     'hidden_size': 1024,
     'depth': 12,
     'num_heads': 16,
