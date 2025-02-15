@@ -38,7 +38,7 @@ class DiffusionPolicy(nn.Module):
         
         self.image_num = len(self.camera_names) * self.observation_horizon
     
-        if self.model_type == 'unet':
+        if self.model_type == 'Unet':
             backbones = []
             pools = []
             linears = []

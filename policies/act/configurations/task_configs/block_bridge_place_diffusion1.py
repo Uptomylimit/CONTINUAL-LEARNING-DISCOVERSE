@@ -59,13 +59,13 @@ POLICY_MODEL_DEFAULT = {
     'img_token_dim': 1152,
     'state_token_dim': 7,
     'hidden_size': 1024,
-    'depth': 12,
-    'num_heads': 16,
+    'depth': 14,
+    'num_heads': 8,
 }
 
 #TODO: set the diffusion policy config
 POLICY_CONFIG_DIFFUSION_DEFAULT = {
-    'model_type': 'RDT',
+    'model_type': 'Unet',   #set RDT to use more powerful model
     'model_args': POLICY_MODEL_DEFAULT,
     # transformer args
     # "hidden_dim": 512,
@@ -91,13 +91,13 @@ TASK_CONFIG_DEFAULT["common"]["policy_config"] = POLICY_CONFIG_DIFFUSION_DEFAULT
 
 
 TASK_CONFIG_DEFAULT["train"]["load_data"]["num_episodes"] = "ALL"
-TASK_CONFIG_DEFAULT["train"]["load_data"]["batch_size_train"] = 4
-TASK_CONFIG_DEFAULT["train"]["load_data"]["batch_size_validate"] = 4
-TASK_CONFIG_DEFAULT["train"]["load_data"]["processor"] = "siglip"
+TASK_CONFIG_DEFAULT["train"]["load_data"]["batch_size_train"] = 8
+TASK_CONFIG_DEFAULT["train"]["load_data"]["batch_size_validate"] = 8
+TASK_CONFIG_DEFAULT["train"]["load_data"]["processor"] = None
 TASK_CONFIG_DEFAULT["train"]["load_data"]["observation_slice"] = None
 TASK_CONFIG_DEFAULT["train"]["load_data"]["action_slice"] = None
-TASK_CONFIG_DEFAULT["train"]["num_epochs"] = 100
-TASK_CONFIG_DEFAULT["train"]["validate_every"] = 50
+TASK_CONFIG_DEFAULT["train"]["num_epochs"] = 1000
+TASK_CONFIG_DEFAULT["train"]["validate_every"] = 100
 TASK_CONFIG_DEFAULT["train"]["learning_rate"] = 2e-5
 TASK_CONFIG_DEFAULT["train"]["pretrain_ckpt_path"] = ""
 TASK_CONFIG_DEFAULT["train"]["pretrain_epoch_base"] = "AUTO"
