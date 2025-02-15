@@ -30,7 +30,7 @@ class MujocoEnv(gym.Env):
         # self.exec_node.cam_id = self.exec_node.config.obs_camera_id
         self.reset_position = None
         print("MujocoEnv initialized")
-
+        self.policy_class = env_config["policy_config"]['policy_class']
         # add qpos and action normalization to 0 1
         # add action clip
         self.qpos_mean = [0]*self.env_config["action_dim"]
@@ -105,24 +105,31 @@ class MujocoEnv(gym.Env):
         #     return 1
         # return 0
 
-    def pre_process(self,a , b, c):
+    def pre_process(self, a, b, c):
         # 确保输入的列表长度相同
         if len(a) != len(b) or len(a) != len(c):
             raise ValueError("输入的列表长度必须相同")
         
         # 计算结果
-        for i in range(len(a)):
-            a[i] = (a[i] - b[i]) / c[i]
+        # for i in range(len(a)):
+        #     a[i] = (a[i] - b[i]) / c[i]
+        return (a - b) / c
+
     
-    def post_process(self,a, b, c):
+    def post_process(self, a, b, c):
         # 确保输入的列表长度相同
         if len(a) != len(b) or len(a) != len(c):
             # print(a,b,c)
             raise ValueError("输入的列表长度必须相同")
         
         # 计算结果
-        for i in range(len(a)):
-            a[i] = a[i]*c[i] + b[i]
+        if self.policy_class == "ACT":
+            # for i in range(len(a)):
+            #     a[i] = a[i]*c[i] + b[i]
+            return a*c + b
+        elif self.policy_class == "Diffusion":
+            return ((a + 1) / 2) * (self.action_max - self.action_min) + self.action_min
+            
 
 
     def reset(self, seed=0):
@@ -144,7 +151,7 @@ class MujocoEnv(gym.Env):
         # time.sleep(sleep_time)
         obs = collections.OrderedDict()
         obs["qpos"] = np.array(raw_obs["jq"])
-        self.pre_process(obs["qpos"],self.qpos_mean,self.qpos_std) # normalization
+        obs["qpos"] = self.pre_process(obs["qpos"],self.qpos_mean,self.qpos_std) # normalization
 
         # print("obs gripper", raw_obs["jq"][-1])
         # print("pre_obs", obs["qpos"])
@@ -186,7 +193,7 @@ class MujocoEnv(gym.Env):
         for i in range(self.env_config["policy_config"]["chunk_size"]):
             # print(action[i],self.action_mean,self.action_std)
 
-            self.post_process(action[i],self.action_mean,self.action_std) # denormalization
+            action[i] = self.post_process(action[i],self.action_mean,self.action_std) # denormalization
 
             raw_obs, pri_obs, rew, ter, info = self.exec_node.step(action[i])
 
@@ -195,7 +202,7 @@ class MujocoEnv(gym.Env):
         if get_obs:
             obs = collections.OrderedDict()
             obs["qpos"] = list(raw_obs["jq"])
-            self.pre_process(obs["qpos"],self.qpos_mean,self.qpos_std) # normalization
+            obs["qpos"] = self.pre_process(obs["qpos"],self.qpos_mean,self.qpos_std) # normalization
             obs["images"] = {}
             for id in self.exec_node.config.obs_rgb_cam_id:
                 obs["images"][f"{id}"] = raw_obs["img"][id][:, :, ::-1]

@@ -184,6 +184,7 @@ class PPO(OnPolicyAlgorithm):
         self.clip_range_vf = clip_range_vf
         self.normalize_advantage = normalize_advantage
         self.target_kl = target_kl
+        self.ema_alpha = 0.05
 
         if _init_setup_model:
             self._setup_model()
@@ -325,10 +326,10 @@ class PPO(OnPolicyAlgorithm):
         # print("self.env",type(self.env))
         # print("self.env",self.env.envs.shape)
         # 更新env中的均值方差参数，也保存于algorithm中
-        self.qpos_mean = qpos_mean
-        self.qpos_std = qpos_std
-        self.action_mean = action_mean
-        self.action_std = action_std
+        self.qpos_mean = self.qpos_mean * (1 - self.ema_alpha) + qpos_mean * self.ema_alpha
+        self.qpos_std = self.qpos_std * (1 - self.ema_alpha) + qpos_std * self.ema_alpha
+        self.action_mean = self.action_mean * (1 - self.ema_alpha) + action_mean * self.ema_alpha
+        self.action_std = self.action_std * (1 - self.ema_alpha) + action_std * self.ema_alpha
         self.stats = {
             "action_mean": self.action_mean,
             "action_std": self.action_std,
@@ -336,10 +337,10 @@ class PPO(OnPolicyAlgorithm):
             "qpos_std": self.qpos_std,
         }
         for i in range(len(self.env.envs)):
-            self.env.envs[i].env.qpos_mean = qpos_mean
-            self.env.envs[i].env.qpos_std = qpos_std
-            self.env.envs[i].env.action_mean = action_mean
-            self.env.envs[i].env.action_std = action_std
+            self.env.envs[i].env.qpos_mean = self.qpos_mean
+            self.env.envs[i].env.qpos_std = self.qpos_std
+            self.env.envs[i].env.action_mean = self.action_mean
+            self.env.envs[i].env.action_std = self.action_std
 
 
         
