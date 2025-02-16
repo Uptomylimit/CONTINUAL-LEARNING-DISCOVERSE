@@ -13,6 +13,7 @@ from diffusers.schedulers.scheduling_ddim import DDIMScheduler
 from diffusers.schedulers.scheduling_dpmsolver_multistep import DPMSolverMultistepScheduler
 from diffusers.training_utils import EMAModel
 
+from policies.act.policies.common.detr.main import CosineAnnealingWarmupRestarts
 
 class DiffusionPolicy(nn.Module):
     def __init__(self, args_override):
@@ -37,7 +38,12 @@ class DiffusionPolicy(nn.Module):
         self.obs_dim = self.feature_dimension * len(self.camera_names) # camera features
         
         self.image_num = len(self.camera_names) * self.observation_horizon
-    
+
+        self.use_cosine_annealing = args_override['use_cosine_annealing']
+        self.lr_min = args_override['lr_min']
+        self.warm_up = args_override['warm_up']
+        self.num_epochs = args_override['num_epochs']
+        
         if self.model_type == 'Unet':
             backbones = []
             pools = []
@@ -174,7 +180,17 @@ class DiffusionPolicy(nn.Module):
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.nets.parameters(), lr=self.lr, weight_decay=self.weight_decay)
-        return optimizer
+        sheduler = None
+        if self.use_cosine_annealing:
+            t_max = self.num_epochs
+            scheduler = CosineAnnealingWarmupRestarts(optimizer, first_cycle_steps=t_max, 
+                                                               cycle_mult=1.0, max_lr=self.lr, 
+                                                               min_lr=self.lr_min, warmup_steps=self.warm_up, gamma=1.0)
+        return optimizer, scheduler
+
+    # def configure_optimizers(self):
+    #     self.optimizer, self.scheduler = build_optimizer(self.model, self._args)
+    #     return self.optimizer, self.scheduler
 
 
     def __call__(self, qpos, image, actions=None, is_pad=None):

@@ -161,6 +161,9 @@ TRAIN_CONFIG_DEFAULT = {
     "cotrain_dir": "",
     "parallel": None,  # {"mode":str, "device_ids":list}, mode: "DP" or "DDP"; device_ids: e.g. [0, 1] or None for all
     "environments": ENV_TRAIN_CONFIG_DEFAULT,
+    "use_cosine_annealing": True,
+    "lr_min": 1e-7,
+    "warm_up": 20,
     # directory containing the hdf5 files
     "load_data": {
         "dataset_dir": DATA_DIR_DEFAULT + f"/{TASK_NAME}",

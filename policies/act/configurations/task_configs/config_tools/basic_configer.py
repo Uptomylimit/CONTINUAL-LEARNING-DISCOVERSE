@@ -61,6 +61,10 @@ def config_policy(args: dict):
             "lr_backbone": policy_args["lr_backbone"],
             "lr": args["learning_rate"],
             "camera_names": camera_names,
+            "use_cosine_annealing": args["use_cosine_annealing"],
+            "lr_min": args["lr_min"],
+            "warm_up": args["warm_up"],
+            "num_epochs": args["num_epochs"]
         }
     elif policy_class == "CNNMLP":
         backbone = "resnet18"
@@ -75,6 +79,10 @@ def config_policy(args: dict):
         policy_config = {
             "lr": args["learning_rate"],
             "camera_names": camera_names,
+            "use_cosine_annealing": args["use_cosine_annealing"],
+            "lr_min": args["lr_min"],
+            "warm_up": args["warm_up"],
+            "num_epochs": args["num_epochs"]
         }
     else:
         policy_config = {}

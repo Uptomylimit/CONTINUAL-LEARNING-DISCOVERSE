@@ -109,11 +109,11 @@ def main(args:dict):
 
 def make_optimizer(policy):
     if hasattr(policy, 'configure_optimizers'):
-        optimizer = policy.configure_optimizers()
+        optimizer,scheduler = policy.configure_optimizers()
     else:
         # TODO: 默认使用Adam优化器
         print('Warning: Using default optimizer')
-    return optimizer
+    return optimizer, scheduler
 
 def forward_pass(data:torch.Tensor, policy):
     image_data, qpos_data, action_data, is_pad = data
@@ -158,7 +158,7 @@ def train_bc(train_dataloader, val_dataloader, config):
     epoch_base = get_epoch_base(pretrain_path, config["pretrain_epoch_base"])
 
     # make optimizer
-    optimizer = make_optimizer(policy)
+    optimizer, scheduler = make_optimizer(policy)
 
     # set GPU device
     if parallel is not None:
@@ -171,7 +171,6 @@ def train_bc(train_dataloader, val_dataloader, config):
             print(f'Using GPUs {device_ids} for DataParallel training')
             device_ids = list(range(len(device_ids)))
             policy = torch.nn.DataParallel(policy, device_ids=device_ids)
-            optimizer = torch.nn.DataParallel(optimizer, device_ids=device_ids)
         elif parallel["mode"] == "DDP":
             # TODO: can not use DDP for now
             raise NotImplementedError
@@ -228,6 +227,8 @@ def train_bc(train_dataloader, val_dataloader, config):
             optimizer.step()
             optimizer.zero_grad()
             train_history.append(detach_dict(forward_dict))
+        if scheduler is not None:
+            scheduler.step()
         epoch_summary = compute_dict_mean(train_history[(batch_idx+1)*(epoch-epoch_base):(batch_idx+1)*(epoch-epoch_base+1)])
         epoch_train_loss = epoch_summary['loss']
         print(f'Train loss: {epoch_train_loss:.5f}')
@@ -235,6 +236,9 @@ def train_bc(train_dataloader, val_dataloader, config):
         for k, v in epoch_summary.items():
             summary_string += f'{k}: {v.item():.3f} '
         print(summary_string)
+
+        current_lr = optimizer.param_groups[0]['lr']
+        print(f'Current lr: {current_lr:.10f}')
 
         if step % config["save_every"] == 0:
             ckpt_path = os.path.join(ckpt_dir, f'policy_epoch_{epoch}_seed_{seed}.ckpt')
