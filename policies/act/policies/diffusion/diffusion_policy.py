@@ -180,7 +180,7 @@ class DiffusionPolicy(nn.Module):
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.nets.parameters(), lr=self.lr, weight_decay=self.weight_decay)
-        sheduler = None
+        scheduler = None
         if self.use_cosine_annealing:
             t_max = self.num_epochs
             scheduler = CosineAnnealingWarmupRestarts(optimizer, first_cycle_steps=t_max, 
