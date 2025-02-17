@@ -199,7 +199,7 @@ class DiffusionPolicy(nn.Module):
             if self.model_type == 'RDT':
                 qpos = qpos.unsqueeze(1)
                 batch_size, _, C, H, W = image.shape
-                image = self.image_processor.preprocess(image.reshape(-1, C, H, W), return_tensors='pt')['pixel_values']
+                image = self.image_processor.preprocess(image.reshape(-1, C, H, W), do_rescale=False, return_tensors='pt')['pixel_values']
                 image_embeds = self.vision_encoder(image).detach()
                 image_embeds = image_embeds.reshape((batch_size, -1, self.vision_encoder.hidden_size))
                 # sample noise to add to actions
@@ -292,7 +292,7 @@ class DiffusionPolicy(nn.Module):
             if self.model_type == 'RDT':
                 qpos = qpos.unsqueeze(1)
                 batch_size, _, C, H, W = image.shape
-                image = self.image_processor.preprocess(image.reshape(-1, C, H, W), return_tensors='pt')['pixel_values']
+                image = self.image_processor.preprocess(image.reshape(-1, C, H, W), do_rescale=False, return_tensors='pt')['pixel_values']
                 image_embeds = self.vision_encoder(image).detach()
                 image_embeds = image_embeds.reshape((batch_size, -1, self.vision_encoder.hidden_size))
 

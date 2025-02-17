@@ -190,6 +190,10 @@ def get_all_config(args: dict, stage: str):
         all_config["learning_rate"] = (
             -1
         )  # TODO：there should not be learning_rate in policy_config
+        all_config["warm_up"] = -1
+        all_config["use_cosine_annealing"] = False
+        all_config["lr_min"] = -1
+        all_config["num_epochs"] = -1
     else:
         raise ValueError(f"stage {stage} not supported, must be 'train' or 'eval'")
     # set policy class and config
