@@ -6,6 +6,7 @@ import re
 
 from ..common.models.multimodal_encoder.siglip_encoder import SiglipVisionTower
 from ..common.models.rdt.rdt_model import RDT
+from ..common.models.chitransformer.ChiTransformer import ChiTransformer
 from robomimic.models.base_nets import ResNet18Conv, SpatialSoftmax
 from robomimic.algo.diffusion_policy import replace_bn_with_gn, ConditionalUnet1D
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
@@ -13,6 +14,7 @@ from diffusers.schedulers.scheduling_ddim import DDIMScheduler
 from diffusers.schedulers.scheduling_dpmsolver_multistep import DPMSolverMultistepScheduler
 from diffusers.training_utils import EMAModel
 
+from policies.act.policies.common.detr.main import CosineAnnealingWarmupRestarts
 
 class DiffusionPolicy(nn.Module):
     def __init__(self, args_override):
@@ -32,12 +34,17 @@ class DiffusionPolicy(nn.Module):
         self.weight_decay = 0
 
         self.num_kp = 32
-        self.feature_dimension = 64
+        self.feature_dimension = 128
         self.ac_dim = args_override['action_dim'] # 14 + 2
         self.obs_dim = self.feature_dimension * len(self.camera_names) # camera features
         
         self.image_num = len(self.camera_names) * self.observation_horizon
-    
+
+        self.use_cosine_annealing = args_override['use_cosine_annealing']
+        self.lr_min = args_override['lr_min']
+        self.warm_up = args_override['warm_up']
+        self.num_epochs = args_override['num_epochs']
+        
         if self.model_type == 'Unet':
             backbones = []
             pools = []
@@ -50,7 +57,7 @@ class DiffusionPolicy(nn.Module):
             pools = nn.ModuleList(pools)
             linears = nn.ModuleList(linears)
             
-            backbones = replace_bn_with_gn(backbones) # TODO
+            backbones = replace_bn_with_gn(backbones)
 
 
             noise_pred_net = ConditionalUnet1D(
@@ -100,6 +107,46 @@ class DiffusionPolicy(nn.Module):
                 })
             })
             nets = nets.to(device='cuda', dtype=torch.bfloat16)
+
+
+        elif self.model_type == 'ChiTransformer':
+            self.model_args = args_override["model_args"]
+            backbones = []
+            pools = []
+            linears = []
+            for _ in range(self.image_num):
+                backbones.append(ResNet18Conv(**{'input_channel': 3, 'pretrained': True, 'input_coord_conv': False}))
+                pools.append(SpatialSoftmax(**{'input_shape': [512, 14, 14], 'num_kp': self.num_kp, 'temperature': 1.0, 'learnable_temperature': False, 'noise_std': 0.0}))
+                linears.append(torch.nn.Linear(int(np.prod([self.num_kp, 2])), self.feature_dimension))
+            backbones = nn.ModuleList(backbones)
+            pools = nn.ModuleList(pools)
+            linears = nn.ModuleList(linears)
+            
+            backbones = replace_bn_with_gn(backbones)
+
+            model = ChiTransformer(
+                act_dim=self.ac_dim,
+                obs_dim=self.obs_dim, 
+                Ta=self.prediction_horizon, 
+                To=self.observation_horizon, 
+                d_model=self.model_args['hidden_size'], 
+                nhead=self.model_args['num_heads'],
+                num_layers=self.model_args['depth'],
+                n_cond_layers=self.model_args['n_cond_layers'],
+                timestep_emb_type=self.model_args['timestep_emb_type'])
+            
+            nets = nn.ModuleDict({
+                'policy': nn.ModuleDict({
+                    'backbones': backbones,
+                    'pools': pools,
+                    'linears': linears,
+                    'qpos_linear':nn.Linear(self.ac_dim, self.feature_dimension * 2),
+                    'noise_pred_net': model
+                })
+            })
+            nets = nets.float().cuda()
+
+            
 
         else:
             print(f"model type {self.model_type} not implemented")
@@ -174,7 +221,17 @@ class DiffusionPolicy(nn.Module):
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.nets.parameters(), lr=self.lr, weight_decay=self.weight_decay)
-        return optimizer
+        scheduler = None
+        if self.use_cosine_annealing:
+            t_max = self.num_epochs
+            scheduler = CosineAnnealingWarmupRestarts(optimizer, first_cycle_steps=t_max, 
+                                                               cycle_mult=1.0, max_lr=self.lr, 
+                                                               min_lr=self.lr_min, warmup_steps=self.warm_up, gamma=1.0)
+        return optimizer, scheduler
+
+    # def configure_optimizers(self):
+    #     self.optimizer, self.scheduler = build_optimizer(self.model, self._args)
+    #     return self.optimizer, self.scheduler
 
 
     def __call__(self, qpos, image, actions=None, is_pad=None):
@@ -183,7 +240,7 @@ class DiffusionPolicy(nn.Module):
             if self.model_type == 'RDT':
                 qpos = qpos.unsqueeze(1)
                 batch_size, _, C, H, W = image.shape
-                image = self.image_processor.preprocess(image.reshape(-1, C, H, W), return_tensors='pt')['pixel_values']
+                image = self.image_processor.preprocess(image.reshape(-1, C, H, W), do_rescale=False, return_tensors='pt')['pixel_values']
                 image_embeds = self.vision_encoder(image).detach()
                 image_embeds = image_embeds.reshape((batch_size, -1, self.vision_encoder.hidden_size))
                 # sample noise to add to actions
@@ -243,6 +300,45 @@ class DiffusionPolicy(nn.Module):
             
                 # predict the noise residual
                 noise_pred = self.nets['policy']['noise_pred_net'](noisy_actions, timesteps, global_cond=obs_cond)
+            
+            elif self.model_type == 'ChiTransformer':
+
+                batch_size, _, C, H, W = image.shape
+                image = image.reshape((batch_size, -1, self.observation_horizon, C, H, W)).permute(0, 2, 1, 3, 4, 5)
+                image = image.reshape((batch_size*self.observation_horizon, -1, C, H, W))
+                #encode conditions
+                all_features = []
+                for cam_id in range(len(self.camera_names)):
+                    cam_image = image[:, cam_id]
+                    cam_features = self.nets['policy']['backbones'][cam_id](cam_image)
+                    pool_features = self.nets['policy']['pools'][cam_id](cam_features)
+                    pool_features = torch.flatten(pool_features, start_dim=1)
+                    out_features = self.nets['policy']['linears'][cam_id](pool_features)
+                    all_features.append(out_features.reshape((batch_size, self.observation_horizon, -1)))
+
+                qpos_feature = self.nets['policy']['qpos_linear'](qpos).unsqueeze(1)
+
+                obs_cond = torch.cat(all_features, dim=-1)
+                obs_cond = obs_cond + qpos_feature
+
+                # sample noise to add to actions
+                noise = torch.randn(actions.shape, dtype=actions.dtype, device=obs_cond.device)
+                
+                # sample a diffusion iteration for each data point
+                timesteps = torch.randint(
+                    0, self.num_train_timesteps, 
+                    (B,), device=obs_cond.device
+                ).long()
+                
+                # add noise to the clean actions according to the noise magnitude at each diffusion iteration
+                # (this is the forward diffusion process)
+                noisy_actions = self.noise_scheduler.add_noise(
+                    actions, noise, timesteps)
+            
+                # predict the noise residual
+                noise_pred = self.nets['policy']['noise_pred_net'](noisy_actions, timesteps, obs_cond)
+
+            
             #other models
             else:
                 print(f"model type {self.model_type} not implemented")
@@ -276,7 +372,7 @@ class DiffusionPolicy(nn.Module):
             if self.model_type == 'RDT':
                 qpos = qpos.unsqueeze(1)
                 batch_size, _, C, H, W = image.shape
-                image = self.image_processor.preprocess(image.reshape(-1, C, H, W), return_tensors='pt')['pixel_values']
+                image = self.image_processor.preprocess(image.reshape(-1, C, H, W), do_rescale=False, return_tensors='pt')['pixel_values']
                 image_embeds = self.vision_encoder(image).detach()
                 image_embeds = image_embeds.reshape((batch_size, -1, self.vision_encoder.hidden_size))
 
@@ -333,6 +429,49 @@ class DiffusionPolicy(nn.Module):
                         sample=naction, 
                         timestep=k,
                         global_cond=obs_cond
+                    )
+
+                    # inverse diffusion step (remove noise)
+                    naction = self.noise_scheduler_sample.step(
+                        model_output=noise_pred,
+                        timestep=k,
+                        sample=naction
+                    ).prev_sample
+
+            elif self.model_type == 'ChiTransformer':
+                batch_size, _, C, H, W = image.shape
+                image = image.reshape((1, len(self.camera_names), -1, C, H, W))
+                image = image.reshape((1*len(self.camera_names), -1, C, H, W))
+
+                #encode conditions
+                all_features = []
+                for cam_id in range(len(self.camera_names)):
+                    cam_image = image[:, cam_id]
+                    cam_features = self.nets['policy']['backbones'][cam_id](cam_image)
+                    pool_features = self.nets['policy']['pools'][cam_id](cam_features)
+                    pool_features = torch.flatten(pool_features, start_dim=1)
+                    out_features = self.nets['policy']['linears'][cam_id](pool_features)
+                    all_features.append(out_features.reshape((batch_size, self.observation_horizon, -1)))
+
+                qpos_feature = self.nets['policy']['qpos_linear'](qpos).unsqueeze(1)
+
+                obs_cond = torch.cat(all_features, dim=-1)
+                obs_cond = obs_cond + qpos_feature
+
+                # initialize action from Guassian noise
+                noisy_action = torch.randn(
+                    (B, Tp, action_dim), device=obs_cond.device)
+                naction = noisy_action
+            
+                # init scheduler
+                self.noise_scheduler_sample.set_timesteps(self.num_inference_timesteps)
+
+                for k in self.noise_scheduler_sample.timesteps:
+                    # predict noise
+                    noise_pred = nets['policy']['noise_pred_net'](
+                        naction, 
+                        k.unsqueeze(-1).to(device=obs_cond.device),
+                        obs_cond
                     )
 
                     # inverse diffusion step (remove noise)

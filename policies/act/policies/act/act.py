@@ -77,5 +77,7 @@ class ACTPolicy(nn.Module):
             return a_hat
 
     def configure_optimizers(self):
-        self.optimizer = build_optimizer(self.model, self._args)
-        return self.optimizer
+        self.optimizer, self.scheduler = build_optimizer(self.model, self._args)
+        return self.optimizer, self.scheduler
+
+

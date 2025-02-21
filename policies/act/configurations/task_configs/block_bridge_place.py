@@ -67,11 +67,17 @@ TASK_CONFIG_DEFAULT["train"]["load_data"]["batch_size_train"] = 4
 TASK_CONFIG_DEFAULT["train"]["load_data"]["batch_size_validate"] = 4
 TASK_CONFIG_DEFAULT["train"]["load_data"]["observation_slice"] = None
 TASK_CONFIG_DEFAULT["train"]["load_data"]["action_slice"] = None
-TASK_CONFIG_DEFAULT["train"]["num_epochs"] = 100
+TASK_CONFIG_DEFAULT["train"]["num_epochs"] = 20
 TASK_CONFIG_DEFAULT["train"]["validate_every"] = 50
 TASK_CONFIG_DEFAULT["train"]["learning_rate"] = 2e-5
 TASK_CONFIG_DEFAULT["train"]["pretrain_ckpt_path"] = ""
 TASK_CONFIG_DEFAULT["train"]["pretrain_epoch_base"] = "AUTO"
+
+# ##################cosine_annealing
+TASK_CONFIG_DEFAULT["train"]["warm_up"] = 5
+TASK_CONFIG_DEFAULT["train"]["use_cosine_annealing"] = True
+TASK_CONFIG_DEFAULT["train"]['lr_min'] = 5e-7
+# #########################
 
 TASK_CONFIG_DEFAULT["eval"]["robot_num"] = 1
 TASK_CONFIG_DEFAULT["eval"]["joint_num"] = joint_num
