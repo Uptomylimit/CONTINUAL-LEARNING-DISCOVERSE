@@ -3,6 +3,7 @@ from habitats.common.robot_devices.cameras.utils import prepare_cv2_imshow
 prepare_cv2_imshow()
 
 import torch
+import torchvision.transforms as transforms
 import numpy as np
 import os, time, logging, pickle, inspect
 from typing import Dict
@@ -217,6 +218,13 @@ def eval_bc(config, ckpt_name, env: CommonEnv):
                         curr_image = get_image(ts.observation["images"], camera_names, image_mode)
                     else:
                         curr_image = get_image(image_list[-observation_horizon:], camera_names, image_mode)
+                    transform = transforms.Compose([
+                        transforms.CenterCrop(448),
+                        transforms.Resize((448, 448))
+                    ])
+
+                    # 应用转换器
+                    curr_image = transform(curr_image)
                     qpos_numpy = np.array(ts.observation["qpos"])
                     logger.debug(f"raw qpos: {qpos_numpy}")
                     qpos = pre_process(qpos_numpy)  # normalize qpos
@@ -263,6 +271,8 @@ def eval_bc(config, ckpt_name, env: CommonEnv):
                         ros1_logger.log_1D("joint_action", list(action))
                         for name, image in ts.observation["images"].items():
                             ros1_logger.log_2D("image_" + name, image)
+                    action[6] = np.clip(action[6], 0.01, 0.98)
+                    print("action", action)
                     ts: dm_env.TimeStep = env.step(action, sleep_time=dt)
 
                     # for visualization
