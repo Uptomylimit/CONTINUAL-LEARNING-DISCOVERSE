@@ -438,6 +438,8 @@ def save_eval_results(
         logger.info(f"Create directory for saving evaluation info: {save_dir}")
         os.makedirs(save_dir)
     save_videos(image_list, dt, video_path=f"{save_path}.mp4", decompress=False)
+    with open(os.path.join(save_dir, f'actions_{rollout_id}.pkl'), 'wb') as f:
+        pickle.dump(action_list, f)
     if save_time_actions:
         np.save(f"{save_path}.npy", all_time_actions.cpu().numpy())
     if save_all:
