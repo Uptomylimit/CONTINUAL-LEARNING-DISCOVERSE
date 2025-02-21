@@ -71,6 +71,9 @@ class TemporalEnsembling(object):
         start = int(max(0, bias))
         end = int(start + self.chunk_size + min(0, bias))
         actions_for_curr_step = self.all_time_actions[start:end, self.t]
+        # print("----------------------")
+        # print(self.t,bias,start,end)
+        # print(actions_for_curr_step.shape)
         # print(actions_for_curr_step.shape)
         # assert actions_for_curr_step.shape[0] <= self.chunk_size
         # assert actions_for_curr_step.shape[1] == self.action_dim
@@ -78,9 +81,35 @@ class TemporalEnsembling(object):
         k = 0.01
         exp_weights = np.exp(-k * np.arange(actions_for_curr_step.shape[0]))
         exp_weights = exp_weights / exp_weights.sum()
-        exp_weights = torch.from_numpy(exp_weights).cuda().unsqueeze(dim=1)
+        # print("exp_weights.shape",exp_weights.shape)
+        exp_weights = torch.from_numpy(exp_weights).cuda()
+        exp_weights = exp_weights.unsqueeze(dim=1)
         new_action = (actions_for_curr_step * exp_weights).sum(dim=0, keepdim=True)
         self.t += 1
+        return new_action
+    
+    def update_frozon_t(self, raw_actions: torch.Tensor) -> torch.Tensor:
+        # raw_actions is a tensor of shape [1, chunk_size, action_dim]
+        # print(raw_actions.shape)
+        self.all_time_actions[[self.t], self.t : self.t + self.chunk_size] = raw_actions
+        bias = self.t - self.chunk_size + 1
+        start = int(max(0, bias))
+        end = int(start + self.chunk_size + min(0, bias))
+        actions_for_curr_step = self.all_time_actions[start:end, self.t]
+        # print("----------------------")
+        # print(self.t,bias,start,end)
+        # print(actions_for_curr_step.shape)
+        # print(actions_for_curr_step.shape)
+        # assert actions_for_curr_step.shape[0] <= self.chunk_size
+        # assert actions_for_curr_step.shape[1] == self.action_dim
+        # TODO: configure the weight function when initiating the class
+        k = 0.01
+        exp_weights = np.exp(-k * np.arange(actions_for_curr_step.shape[0]))
+        exp_weights = exp_weights / exp_weights.sum()
+        # print("exp_weights.shape",exp_weights.shape)
+        exp_weights = torch.from_numpy(exp_weights).cuda()
+        exp_weights = exp_weights.unsqueeze(dim=1)
+        new_action = (actions_for_curr_step * exp_weights).sum(dim=0, keepdim=True)
         return new_action
 
     def __call__(self, policy) -> None:

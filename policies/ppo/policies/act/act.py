@@ -24,11 +24,23 @@ class ACTPolicy(nn.Module):
         self.temporal_ensembler = None
         try:
             if args_override["temporal_agg"]:
+                print("Using Temporal Aggregation")
+                # print(args_override)
                 self.temporal_ensembler = TemporalEnsembling(
                     args_override["chunk_size"],
                     args_override["action_dim"],
                     args_override["max_timesteps"],
                 )
+                self.eval_temporal_ensembler = TemporalEnsembling(
+                    args_override["chunk_size"],
+                    args_override["action_dim"],
+                    args_override["max_timesteps"],
+                )
+                # print("temporal_ensembler",self.temporal_ensembler)
+                if self.temporal_ensembler is not None:
+                    print("Temporal Ensembler Initialized")
+
+
         except Exception as e:
             print(e)
             print(
@@ -39,9 +51,11 @@ class ACTPolicy(nn.Module):
     def reset(self):
         if self.temporal_ensembler is not None:
             self.temporal_ensembler.reset()
+        if self.eval_temporal_ensembler is not None:
+            self.eval_temporal_ensembler.reset()
 
     # TODO: 使用装饰器在外部进行包装
-    def __call__(self, qpos, image: Tensor, actions=None, is_pad=None):
+    def __call__(self, qpos, image: Tensor, actions=None, is_pad=None, eval_temporal=False):
 
         # print(qpos,image)
         if image.ndim == 4:
@@ -73,10 +87,76 @@ class ACTPolicy(nn.Module):
         else:  # inference
             # no action, sample from prior
             a_hat, _, (_, _) = self.model(qpos, image, env_state)
-            if self.temporal_ensembler is not None:
+            # print("a_hat:", a_hat.shape)
+            if eval_temporal and self.eval_temporal_ensembler is not None:
+                a_hat_one = self.eval_temporal_ensembler.update(a_hat)
+                # print("a_hat_one:", a_hat_one)
+                a_hat[0][0] = a_hat_one
+                # print("a_hat:", a_hat.shape)
+            elif self.temporal_ensembler is not None:
                 a_hat_one = self.temporal_ensembler.update(a_hat)
+                # print("a_hat_one:", a_hat_one)
                 a_hat[0][0] = a_hat_one
             return a_hat
+        
+    def get_tem_action_and_raw_action(self, qpos, image: Tensor, actions=None, is_pad=None, eval_temporal=False):
+
+        # print(qpos,image)
+        if image.ndim == 4:
+            image = image.unsqueeze(0)
+        env_state = None
+        # TODO: imagenet norm, move this outside
+        normalize = transforms.Normalize(
+            mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+        )
+        image = normalize(image)
+        
+        # no action, sample from prior
+        a_hat, _, (_, _) = self.model(qpos, image, env_state)
+
+        if self.temporal_ensembler is not None:
+            raw_action = a_hat.clone()
+            a_hat_one = self.temporal_ensembler.update(a_hat)
+            # print("a_hat_one:", a_hat_one)
+            a_hat[0][0] = a_hat_one
+        return a_hat,raw_action
+
+        
+    # def temporal_agg_calculate(self, qpos, image: Tensor, actions=None, is_pad=None):
+
+    #     # print(qpos,image)
+    #     if image.ndim == 4:
+    #         image = image.unsqueeze(0)
+    #     env_state = None
+    #     # TODO: imagenet norm, move this outside
+    #     normalize = transforms.Normalize(
+    #         mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+    #     )
+    #     image = normalize(image)
+        
+    #     a_hat, _, (_, _) = self.model(qpos, image, env_state)
+    #     # print("a_hat:", a_hat.shape)
+    #     if self.temporal_ensembler is not None:
+    #         a_hat_one = self.temporal_ensembler.update_frozon_t(a_hat)
+    #         # print("a_hat_one:", a_hat_one)
+    #         a_hat[0][0] = a_hat_one
+    #     return a_hat
+    
+    def no_temporal_agg_calculate(self, qpos, image: Tensor, actions=None, is_pad=None):
+
+        # print(qpos,image)
+        if image.ndim == 4:
+            image = image.unsqueeze(0)
+        env_state = None
+        # TODO: imagenet norm, move this outside
+        normalize = transforms.Normalize(
+            mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+        )
+        image = normalize(image)
+        
+        a_hat, _, (_, _) = self.model(qpos, image, env_state)
+        # print("a_hat:", a_hat.shape)
+        return a_hat
 
     def configure_optimizers(self):
         self.optimizer = build_optimizer(self.model, self._args)

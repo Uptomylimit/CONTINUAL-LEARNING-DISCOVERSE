@@ -8,11 +8,12 @@ import torch as th
 from gymnasium import spaces
 
 from stable_baselines3.common.preprocessing import get_action_dim, get_obs_shape
-from stable_baselines3.common.type_aliases import (
+from policies.ppo.common.type_aliases import (
     DictReplayBufferSamples,
     DictRolloutBufferSamples,
     ReplayBufferSamples,
     RolloutBufferSamples,
+    DictRolloutBufferSamples_act_tem,
 )
 from stable_baselines3.common.utils import get_device
 from stable_baselines3.common.vec_env import VecNormalize
@@ -390,11 +391,13 @@ class RolloutBuffer(BaseBuffer):
 
     def reset(self) -> None:
         self.observations = np.zeros((self.buffer_size, self.n_envs, *self.obs_shape), dtype=np.float32)
+        self.new_observations = np.zeros((self.buffer_size, self.n_envs, *self.obs_shape), dtype=np.float32)
         self.actions = np.zeros((self.buffer_size, self.n_envs, self.action_dim), dtype=np.float32)
         self.rewards = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
         self.returns = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
         self.episode_starts = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
         self.values = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
+        self.next_values = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
         self.log_probs = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
         self.advantages = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
         self.generator_ready = False
@@ -436,6 +439,7 @@ class RolloutBuffer(BaseBuffer):
         # TD(lambda) estimator, see Github PR #375 or "Telescoping in TD(lambda)"
         # in David Silver Lecture 4: https://www.youtube.com/watch?v=PnHCvfgC_ZA
         self.returns = self.advantages + self.values
+
 
     def add(
         self,
@@ -724,6 +728,7 @@ class DictRolloutBuffer(RolloutBuffer):
 
     def __init__(
         self,
+        policy_config,
         buffer_size: int,
         observation_space: spaces.Dict,
         action_space: spaces.Space,
@@ -732,6 +737,8 @@ class DictRolloutBuffer(RolloutBuffer):
         gamma: float = 0.99,
         n_envs: int = 1,
     ):
+        self.policy_config = policy_config
+
         super(RolloutBuffer, self).__init__(buffer_size, observation_space, action_space, device, n_envs=n_envs)
 
         assert isinstance(self.obs_shape, dict), "DictRolloutBuffer must be used with Dict obs space only"
@@ -746,11 +753,16 @@ class DictRolloutBuffer(RolloutBuffer):
         self.observations = {}
         for key, obs_input_shape in self.obs_shape.items():
             self.observations[key] = np.zeros((self.buffer_size, self.n_envs, *obs_input_shape), dtype=np.float32)
+        self.new_observations = {}
+        for key, obs_input_shape in self.obs_shape.items():
+            self.new_observations[key] = np.zeros((self.buffer_size, self.n_envs, *obs_input_shape), dtype=np.float32)
         self.actions = np.zeros((self.buffer_size, self.n_envs, self.action_dim), dtype=np.float32)
+        self.raw_actions = np.zeros((self.buffer_size, self.n_envs, self.policy_config['chunk_size']*self.action_dim), dtype=np.float32)
         self.rewards = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
         self.returns = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
         self.episode_starts = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
         self.values = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
+        self.next_values = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
         self.log_probs = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
         self.advantages = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
         self.generator_ready = False
@@ -759,7 +771,9 @@ class DictRolloutBuffer(RolloutBuffer):
     def add(  # type: ignore[override]
         self,
         obs: dict[str, np.ndarray],
+        new_obs: dict[str, np.ndarray],
         action: np.ndarray,
+        raw_action: np.ndarray,
         reward: np.ndarray,
         episode_start: np.ndarray,
         value: th.Tensor,
@@ -787,10 +801,19 @@ class DictRolloutBuffer(RolloutBuffer):
                 obs_ = obs_.reshape((self.n_envs,) + self.obs_shape[key])
             self.observations[key][self.pos] = obs_
 
+        for key in self.observations.keys():
+            new_obs_ = np.array(new_obs[key])
+            # Reshape needed when using multiple envs with discrete observations
+            # as numpy cannot broadcast (n_discrete,) to (n_discrete, 1)
+            if isinstance(self.observation_space.spaces[key], spaces.Discrete):
+                new_obs_ = new_obs_.reshape((self.n_envs,) + self.obs_shape[key])
+            self.new_observations[key][self.pos] = new_obs_
+
         # Reshape to handle multi-dim and discrete action spaces, see GH #970 #1392
         action = action.reshape((self.n_envs, self.action_dim))
 
         self.actions[self.pos] = np.array(action)
+        self.raw_actions[self.pos] = np.array(raw_action)
         self.rewards[self.pos] = np.array(reward)
         self.episode_starts[self.pos] = np.array(episode_start)
         self.values[self.pos] = value.clone().cpu().numpy().flatten()
@@ -799,12 +822,45 @@ class DictRolloutBuffer(RolloutBuffer):
         if self.pos == self.buffer_size:
             self.full = True
 
+    def add_execute_log_prob(  # type: ignore[override]
+        self,
+        execute_log_prob: th.Tensor,
+    ) -> None:
+        """
+        :param execute_log_prob: log probability of the executed action
+            following the current policy.
+        """
+        if len(execute_log_prob.shape) == 0:
+            # Reshape 0-d tensor to avoid error
+            execute_log_prob = execute_log_prob.reshape(-1, 1)
+
+        self.log_probs[self.pos-self.policy_config["chunk_size"]] = execute_log_prob.clone().cpu().numpy()
+
     def get(  # type: ignore[override]
         self,
         batch_size: Optional[int] = None,
     ) -> Generator[DictRolloutBufferSamples, None, None]:
         assert self.full, ""
-        indices = np.random.permutation(self.buffer_size * self.n_envs)
+        if self.policy_config["temporal_agg"]:
+            valid_indices = []
+            i = 0
+            while i < self.buffer_size:
+                if i + self.policy_config["chunk_size"] > self.buffer_size:
+                    break
+                elif i + self.policy_config["chunk_size"] == self.buffer_size or self.episode_starts[i+self.policy_config["chunk_size"]]:
+                    valid_indices.append(i)
+                    i += self.policy_config["chunk_size"]  # 将全局下标添加到列表中
+                else:
+                    valid_indices.append(i)
+                    i += 1
+            
+            # 随机抽样
+            # print("indices: ",valid_indices)
+            indices = np.random.permutation(valid_indices)
+            # print("indices: ",indices)
+
+        else:
+            indices = np.random.permutation(self.buffer_size * self.n_envs)
         # Prepare the data
         if not self.generator_ready:
             for key, obs in self.observations.items():
@@ -821,10 +877,39 @@ class DictRolloutBuffer(RolloutBuffer):
             batch_size = self.buffer_size * self.n_envs
 
         start_idx = 0
-        while start_idx < self.buffer_size * self.n_envs:
-            yield self._get_samples(indices[start_idx : start_idx + batch_size])
-            start_idx += batch_size
+        if self.policy_config["temporal_agg"]:
+            ## 防止start_idx + batch_size-1 超出 self.buffer_size * self.n_envs - (self.policy_config["chunk_size"] - 1)的范围
+            while start_idx < len(indices):
+                yield self._get_samples_act(indices[start_idx : start_idx + batch_size])
+                start_idx += batch_size
+        else:
+            while start_idx < self.buffer_size * self.n_envs:
+                yield self._get_samples(indices[start_idx : start_idx + batch_size])
+                start_idx += batch_size
 
+    def _get_samples_act(  # type: ignore[override]
+        self,
+        batch_inds: np.ndarray,
+        env: Optional[VecNormalize] = None,
+    ) -> DictRolloutBufferSamples_act_tem:
+        
+        actions = []
+        for index in batch_inds:
+            # print("index: ",index)
+            # print(self.actions[index:index+self.policy_config["chunk_size"]])
+            actions.append(self.actions[index:index+self.policy_config["chunk_size"]].flatten())
+        actions=self.to_torch(actions)
+
+        return DictRolloutBufferSamples_act_tem(
+            observations={key: self.to_torch(obs[batch_inds]) for (key, obs) in self.observations.items()},
+            actions=actions,
+            raw_actions=self.to_torch(self.raw_actions[batch_inds]).flatten(start_dim=1),
+            old_values=self.to_torch(self.values[batch_inds].flatten()),
+            old_log_prob=self.to_torch(self.log_probs[batch_inds].flatten()),
+            advantages=self.to_torch(self.advantages[batch_inds].flatten()),
+            returns=self.to_torch(self.returns[batch_inds].flatten()),
+        )
+    
     def _get_samples(  # type: ignore[override]
         self,
         batch_inds: np.ndarray,
@@ -838,3 +923,115 @@ class DictRolloutBuffer(RolloutBuffer):
             advantages=self.to_torch(self.advantages[batch_inds].flatten()),
             returns=self.to_torch(self.returns[batch_inds].flatten()),
         )
+    
+    def compute_next_values(self,policy):
+        for env_id in range(self.n_envs):
+            for step in range(self.buffer_size):
+                # print("step: ",step)
+                next_obs = {}
+                with th.no_grad():
+                    for key in self.observations.keys():
+                        next_obs[key] = th.as_tensor(self.new_observations[key][step][env_id],dtype=th.float32).unsqueeze(0).cuda()
+                        # print("self.newobs_shape",self.new_observations[key][step][env_id].shape)
+                with th.no_grad():
+                    self.next_values[step] = policy.predict_values(next_obs)[0].cpu().numpy()
+
+
+    def compute_returns_and_advantage_temporal_agg(self, last_values: th.Tensor, dones: np.ndarray) -> None:
+        """
+        Post-processing step: compute the lambda-return (TD(lambda) estimate)
+        and GAE(lambda) advantage.
+
+        Uses Generalized Advantage Estimation (https://arxiv.org/abs/1506.02438)
+        to compute the advantage. To obtain Monte-Carlo advantage estimate (A(s) = R - V(S))
+        where R is the sum of discounted reward with value bootstrap
+        (because we don't always have full episode), set ``gae_lambda=1.0`` during initialization.
+
+        The TD(lambda) estimator has also two special cases:
+        - TD(1) is Monte-Carlo estimate (sum of discounted rewards)
+        - TD(0) is one-step estimate with bootstrapping (r_t + gamma * v(s_{t+1}))
+
+        For more information, see discussion in https://github.com/DLR-RM/stable-baselines3/pull/375.
+
+        :param last_values: state value estimation for the last step (one for each env)
+        :param dones: if the last step was a terminal step (one bool for each env).
+        """
+        # Convert to numpy
+        last_values = last_values.clone().cpu().numpy().flatten()  # type: ignore[assignment]
+
+        last_gae_lam = 0
+        # to do: 并行采集数据的env怎么做？
+        # for step in reversed(range(self.buffer_size-(self.policy_config["chunk_size"]-1))):
+        step = self.buffer_size-1 
+        # -self.policy_config["chunk_size"]
+        gamma = 1
+        delta = 0
+        a_1 = 0
+        gamma_c_lamda = np.power(self.gamma,self.policy_config["chunk_size"])*self.gae_lambda
+        while step>=0:
+            gamma = 1
+            if step == self.buffer_size-1:
+                step -= self.policy_config["chunk_size"]-1
+
+                next_non_terminal = 1.0 - dones.astype(np.float32)
+                next_values = last_values
+                rewards = 0
+
+                for i in range(step,step+self.policy_config["chunk_size"]):
+                    rewards += gamma * self.rewards[i]
+                    gamma*= self.gamma
+                a_1 = rewards + gamma * next_values * next_non_terminal - self.values[step]
+                delta = 0
+                # last_gae_lam = delta + self.gamma * self.gae_lambda * next_non_terminal * last_gae_lam
+                last_gae_lam = delta + 0
+                gae_act = a_1 + gamma_c_lamda * last_gae_lam
+
+                
+            elif self.episode_starts[step + 1]:
+                next_values = self.next_values[step]
+                step -= self.policy_config["chunk_size"]-1
+
+                next_non_terminal = 1.0 - self.episode_starts[step + 1]
+                rewards = 0
+                # for i in range(step-(self.policy_config["chunk_size"]-1), step+1):
+
+                for i in range(step,step+self.policy_config["chunk_size"]):
+                    rewards += gamma * self.rewards[i]
+                    gamma*= self.gamma
+
+                a_1 = rewards + gamma * next_values * next_non_terminal - self.values[step]
+                delta = 0
+                # last_gae_lam = delta + self.gamma * self.gae_lambda * next_non_terminal * last_gae_lam
+                last_gae_lam = delta + 0
+                gae_act = a_1 +  gamma_c_lamda * last_gae_lam
+
+                
+            else:
+                next_values = self.next_values[step + self.policy_config["chunk_size"]-1]
+                
+                rewards = 0
+                for i in range(step,step+self.policy_config["chunk_size"]):
+                    rewards += gamma * self.rewards[i]
+                    gamma *= self.gamma
+
+                a_1 = rewards + gamma * next_values - self.values[step]
+
+                # print("a_1",a_1)
+
+                next_values = self.next_values[step + self.policy_config["chunk_size"]]
+                if step + self.policy_config["chunk_size"]==self.buffer_size-1:
+                    next_non_terminal = 1.0 - dones.astype(np.float32)
+                else:
+                    next_non_terminal = 1.0 - self.episode_starts[step + self.policy_config["chunk_size"] + 1]
+                delta = self.rewards[step+ self.policy_config["chunk_size"]] + self.gamma * next_values * next_non_terminal - self.values[step+ self.policy_config["chunk_size"]]
+                # print("delta",delta)
+                last_gae_lam = delta + self.gamma * self.gae_lambda * last_gae_lam
+                # print("last_gae_lam",last_gae_lam)
+                # print(self.gamma,gamma_c_lamda,self.gae_lambda)
+                gae_act = a_1 +  gamma_c_lamda * last_gae_lam
+
+            self.advantages[step] = gae_act
+            step -= 1
+        # TD(lambda) estimator, see Github PR #375 or "Telescoping in TD(lambda)"
+        # in David Silver Lecture 4: https://www.youtube.com/watch?v=PnHCvfgC_ZA
+        self.returns = self.advantages + self.values

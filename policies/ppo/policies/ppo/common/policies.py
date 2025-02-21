@@ -394,9 +394,9 @@ class BasePolicy(BaseModel, ABC):
         # print("basepolicy predict3:", actions)
 
         # Remove batch dimension if needed
-        if not vectorized_env:
-            assert isinstance(actions, np.ndarray)
-            actions = actions.squeeze(axis=0)
+        # if not vectorized_env:
+        #     assert isinstance(actions, np.ndarray)
+        #     actions = actions.squeeze(axis=0)
         # print("----------------------------")
         # print("basepolicy predict4:", actions)
         return actions, state  # type: ignore[return-value]
@@ -973,6 +973,9 @@ class ACT_ActorCriticPolicy(BasePolicy):
         if isinstance(self.action_dist, DiagGaussianDistribution):
             self.log_std = nn.Parameter(th.ones((self.act_policy_config["chunk_size"]*self.act_policy_config["action_dim"]))
                                          * self.log_std_init, requires_grad=True)
+            # print("---self.log_std_init---")
+            # print(self.log_std_init)
+            # print(self.log_std)
 
             # self.action_net, self.log_std = self.action_dist.proba_distribution_net(
             #     latent_dim=latent_dim_pi, log_std_init=self.log_std_init
@@ -1044,12 +1047,46 @@ class ACT_ActorCriticPolicy(BasePolicy):
         # Evaluate the values for the given observations
         values = self.value_net(latent_vf)
 
-        distribution = self._get_action_dist_from_obs(obs)
+        exe_actions,raw_actions = self.policy_net.get_tem_action_and_raw_action(obs["qpos"],obs["images"])
+        # print("actions: ",exe_actions)
+        # print("raw_actions: ",raw_actions)
+        
+        exe_actions = th.flatten(exe_actions,start_dim=1)
+        raw_actions = th.flatten(raw_actions,start_dim=1)
+
+        if isinstance(self.action_dist, DiagGaussianDistribution):
+            # print("DiagGaussianDistribution!!!!!!!!!!!!!!!!!!!1")
+            # print("self.log_std",self.log_std)
+            # distribution_raw = self.action_dist.proba_distribution(raw_actions, self.log_std)
+            distribution_exe = self.action_dist.proba_distribution(exe_actions, self.log_std)
+
         # distribution = self._get_action_dist_from_latent(latent_pi)
-        actions = distribution.get_actions(deterministic=deterministic)
-        log_prob = distribution.log_prob(actions)
-        actions = actions.reshape((-1, *self.action_space.shape))  # type: ignore[misc]
-        return actions, values, log_prob
+        actions = distribution_exe.get_actions(deterministic=deterministic)
+        # log_prob = distribution_raw.log_prob()
+        # print("actions:",actions)
+        # print("values:",values)
+        # print("log_prob:",log_prob)
+        if self.act_policy_config["temporal_agg"]:
+            actions = actions.reshape((-1, self.act_policy_config["chunk_size"], self.act_policy_config["action_dim"]))
+        else:
+            actions = actions.reshape((-1, *self.action_space.shape))  # type: ignore[misc]
+        return actions, raw_actions, values, "No log_prob"
+    
+    def compute_log_prob(self, mean_actions, action: th.Tensor) -> th.Tensor:
+        """
+        :return: log probability of input action
+        """
+        mean_actions = th.as_tensor(mean_actions,device=self.device,dtype=th.float32)
+        mean_actions = mean_actions.flatten(start_dim=1)
+        distribution = self.action_dist.proba_distribution(mean_actions, self.log_std)
+
+        # print("self.log_std",self.log_std)
+        # print("mean_actions:",mean_actions)
+        # print("actions:",actions)
+
+        log_prob = distribution.log_prob(action)
+
+        return log_prob
 
     def extract_features(  # type: ignore[override]
         self, obs: PyTorchObs, features_extractor: Optional[BaseFeaturesExtractor] = None
@@ -1100,9 +1137,12 @@ class ACT_ActorCriticPolicy(BasePolicy):
         else:
             raise ValueError("Invalid action distribution")
         
-    def _get_action_dist_from_obs(self, obs: th.Tensor) -> Distribution:
+    def _get_action_dist_from_obs(self, obs: th.Tensor, no_temporal_agg=False) -> Distribution:
         """
         Retrieve action distribution given the latent codes.
+
+        temporal_agg_frozon: frozon teporal_agg t
+        no_temporal_agg: 强制禁止使用temporal_agg，尽管act_policy_config中设置了temporal_agg
 
         :param latent_pi: Latent code for the actor
         :return: Action distribution
@@ -1110,11 +1150,15 @@ class ACT_ActorCriticPolicy(BasePolicy):
         # print("------------------------")
         # print(obs["qpos"].shape,obs["images"].shape)
         # print("act_outsize",self.policy_net(obs["qpos"],obs["images"]).shape)
-        mean_actions = th.flatten(self.policy_net(obs["qpos"],obs["images"]),start_dim=1)
-        # print("mean_actions:",mean_actions.shape)
+        if no_temporal_agg:
+            mean_actions = th.flatten(self.policy_net.no_temporal_agg_calculate(obs["qpos"],obs["images"]),start_dim=1)
+        else:
+            mean_actions = th.flatten(self.policy_net(obs["qpos"],obs["images"]),start_dim=1)
+        # print("mean_actions:",mean_actions.reshape(25,7))
 
         if isinstance(self.action_dist, DiagGaussianDistribution):
             # print("DiagGaussianDistribution!!!!!!!!!!!!!!!!!!!1")
+            # print("self.log_std",self.log_std)
             return self.action_dist.proba_distribution(mean_actions, self.log_std)
         elif isinstance(self.action_dist, CategoricalDistribution):
             # Here mean_actions are the logits before the softmax
@@ -1125,8 +1169,8 @@ class ACT_ActorCriticPolicy(BasePolicy):
         elif isinstance(self.action_dist, BernoulliDistribution):
             # Here mean_actions are the logits (before rounding to get the binary actions)
             return self.action_dist.proba_distribution(action_logits=mean_actions)
-        elif isinstance(self.action_dist, StateDependentNoiseDistribution):
-            return self.action_dist.proba_distribution(mean_actions, self.log_std, latent_pi)
+        # elif isinstance(self.action_dist, StateDependentNoiseDistribution):
+        #     return self.action_dist.proba_distribution(mean_actions, self.log_std, latent_pi)
         else:
             raise ValueError("Invalid action distribution")
 
@@ -1162,12 +1206,59 @@ class ACT_ActorCriticPolicy(BasePolicy):
         # distribution = self._get_action_dist_from_latent(latent_pi)
         # log_prob = distribution.log_prob(actions)
         # values = self.value_net(latent_vf)
+        # print("--------shape--------")
+        # print(obs["qpos"].shape)
+        # print(actions.shape)
 
         latent_vf = self.mlp_extractor.forward_critic(features)
-        distribution = self._get_action_dist_from_obs(obs)
+        distribution = self._get_action_dist_from_obs(obs,no_temporal_agg=True)
         log_prob = distribution.log_prob(actions)
+        # print("log_prob",log_prob.shape)
         values = self.value_net(latent_vf)
+        entropy = distribution.entropy()
+        return values, log_prob, entropy
+    
+    def evaluate_actions_for_NAN(self, obs, mean_actions, actions: th.Tensor) -> tuple[th.Tensor, th.Tensor, Optional[th.Tensor]]:
+        """
+        重新计算meanactions时一直报nan的错，因此考虑直接把推导出来的action保存下来
 
+        Evaluate actions according to the current policy,
+        given the observations.
+
+        :param obs: Observation
+        :param actions: Actions
+        :return: estimated value, log likelihood of taking those actions
+            and entropy of the action distribution.
+        """
+        # Preprocess the observation if needed
+        features = self.extract_features(obs)
+
+        # if self.share_features_extractor:
+        #     latent_pi, latent_vf = self.mlp_extractor(features)
+        # else:
+        #     pi_features, vf_features = features
+        #     latent_pi = self.mlp_extractor.forward_actor(pi_features)
+        #     latent_vf = self.mlp_extractor.forward_critic(vf_features)
+        # distribution = self._get_action_dist_from_latent(latent_pi)
+        # log_prob = distribution.log_prob(actions)
+        # values = self.value_net(latent_vf)
+        # print("--------shape--------")
+        # print(obs["qpos"].shape)
+        # print(actions.shape)
+
+        latent_vf = self.mlp_extractor.forward_critic(features)
+
+        # print("self.log_std",self.log_std)
+
+        distribution = self.action_dist.proba_distribution(mean_actions, self.log_std)
+
+        # print("self.log_std",self.log_std)
+        # print("mean_actions:",mean_actions)
+        # print("actions:",actions)
+
+        log_prob = distribution.log_prob(actions)
+        # print("log_prob",log_prob.shape)
+        values = self.value_net(latent_vf)
         entropy = distribution.entropy()
         return values, log_prob, entropy
 
@@ -1190,9 +1281,33 @@ class ACT_ActorCriticPolicy(BasePolicy):
         :param obs: Observation
         :return: the estimated values.
         """
+        # print(obs["images"].shape)
         features = super().extract_features(obs, self.vf_features_extractor)
         latent_vf = self.mlp_extractor.forward_critic(features)
         return self.value_net(latent_vf)
+    
+    def eval_predict(self, obs, deterministic: bool = True):
+
+        with th.no_grad():
+        
+            obs_tensor,_ = self.obs_to_tensor(obs)
+
+            # print("------qpos------")
+            # print(obs["qpos"])
+            # print(obs_tensor["qpos"])
+
+            mean_actions = th.flatten(self.policy_net(obs_tensor["qpos"],obs_tensor["images"],eval_temporal=True),start_dim=1)
+            # print("mean_actions:",mean_actions.reshape(25,7))
+
+            dist =  self.action_dist.proba_distribution(mean_actions, self.log_std)
+            
+            actions = dist.get_actions(deterministic=deterministic)
+
+            actions = actions.cpu().numpy().reshape((-1, *self.action_space.shape)) 
+
+        # print("actions:",actions.shape)
+        
+        return actions
 
 
 

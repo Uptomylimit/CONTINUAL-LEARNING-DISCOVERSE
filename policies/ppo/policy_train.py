@@ -19,7 +19,7 @@ from policies.ppo.common.policies import ACT_ActorCriticPolicy
 from envs.common_env import get_image, CommonEnv
 from policies.ppo.common.env_util import make_vec_env
 from policies.ppo.common.evaluation import evaluate_policy
-from policies.ppo.common.callbacks import EvalCallback
+from policies.ppo.common.callbacks import EvalCallback,CustomEvalCallback
 
 
 logging.basicConfig(level=logging.INFO)
@@ -199,6 +199,7 @@ def train_bc(env,env_maker, config):
     ckpt_dir = config['ckpt_dir']
     seed = config['seed']
     policy_config = config['policy_config']
+    print("policy_config temporal_agg",policy_config["temporal_agg"])
     stats_dir = os.path.dirname(config['stats_path'])
     eval_every = 3.14 if config["eval_every"] == 0 else config["eval_every"]
     parallel = config["parallel"]
@@ -215,8 +216,8 @@ def train_bc(env,env_maker, config):
                               config['load_time_stamp'],
                               "policy_best.ckpt")
     
-    # policy_config["ckpt_path"] = pretrain_path
-    policy_config["ckpt_path"] = ""
+    policy_config["ckpt_path"] = pretrain_path
+    # policy_config["ckpt_path"] = ""
     print(f'Loading pretrained policy from {pretrain_path}...')
     # policy = make_policy(policy_config, "train")
 
@@ -225,6 +226,16 @@ def train_bc(env,env_maker, config):
 
     # # make optimizer
     # optimizer = make_optimizer(policy)
+
+        
+    policy_config["stage"] = "train"
+
+    train_env = make_vec_env(env_maker,config, n_envs=1)  # 訓練環境
+    eval_env = make_vec_env(env_maker,config, n_envs=1)   # 驗證環境
+    ppo = PPO(ACT_ActorCriticPolicy,train_env,policy_config,n_steps=config['n_steps'],batch_size=2)
+    eval_callback = EvalCallback(eval_env, best_model_save_path=config['ckpt_dir'],
+                             log_path=config['ckpt_dir'], eval_freq=config['eval_freq'],
+                             n_eval_episodes=config['eval_episodes'], deterministic=True, render=False)
 
     # set GPU device
     if parallel is not None:
@@ -236,8 +247,8 @@ def train_bc(env,env_maker, config):
             assert len(device_ids) > 1, "DP mode requires more than 1 GPU"
             print(f'Using GPUs {device_ids} for DataParallel training')
             device_ids = list(range(len(device_ids)))
-            policy = torch.nn.DataParallel(policy, device_ids=device_ids)
-            optimizer = torch.nn.DataParallel(optimizer, device_ids=device_ids)
+            ppo.policy = torch.nn.DataParallel(ppo.policy, device_ids=device_ids)
+            # optimizer = torch.nn.DataParallel(optimizer, device_ids=device_ids)
         elif parallel["mode"] == "DDP":
             # TODO: can not use DDP for now
             raise NotImplementedError
@@ -245,41 +256,89 @@ def train_bc(env,env_maker, config):
         else:
             raise ValueError(f'Invalid parallel mode: {parallel["mode"]}')
         
-    policy_config["stage"] = "train"
-
-    train_env = make_vec_env(env_maker,config, n_envs=1)  # 訓練環境
-    eval_env = make_vec_env(env_maker,config, n_envs=1)   # 驗證環境
-    ppo = PPO(ACT_ActorCriticPolicy,train_env,policy_config,n_steps=20,batch_size=10)
-    eval_callback = EvalCallback(eval_env, best_model_save_path=config['ckpt_dir'],
-                             log_path=config['ckpt_dir'], eval_freq=40,
-                             n_eval_episodes=5, deterministic=True, render=False)
-    ppo.learn(total_timesteps=1000,callback=eval_callback)
-    # ppo.load()
-
 
     # image_list = []
     # dt = 1 / config["fps"]
     # obs,_ = env.reset()
     # # print("reset_obs:",obs["qpos"])
     # # print("reset_obs:", obs["images"])
+    # policy = make_policy(policy_config, "eval")
     # for _ in range(300):
-    #     action, _states = ppo.predict(obs,deterministic=True)
+    #     # action, _states = ppo.predict(obs,deterministic=True)
+
+    #     curr_image = torch.from_numpy(obs["images"]).float().cuda().unsqueeze(0)
+
+    #     qpos = torch.from_numpy(np.array(obs["qpos"])).float().cuda().unsqueeze(0)
+
+    #     action = policy(qpos,curr_image)
+
+    #     action = action.cpu().detach().numpy()
+
+    #     # print("post_qpos",qpos)
+    #     # print(curr_image[0][0],curr_image[0][1])
     #     # print(action.reshape(25,7))
     #     obs, rewards, dones, _, info = env.step(action)
     #     image_list.append(obs["images"])
-    #     # print("1")
+
     #     # print(action.reshape(25,7))
-    #     # env.render()
     #     if dones:
     #         break
     # env.close()
 
+    import cv2
+    reward_episode = []
+    for i in range(config["eval_episodes"]):
+        image_list = []
+        dt = 1 / config["fps"]
+        obs,_ = env.reset()
+        rewards = 0
+        array = (obs["images"] * 255).astype(np.uint8)
+        tran_array = []
+        for j in range(len(array)):
+            tran_array.append(np.moveaxis(array[j], 0, -1))
+            con_image = np.hstack(tran_array)
+            image_list.append(con_image)
+        for _ in range(config["max_timesteps"]):
+            # action, _states = ppo.predict(obs,deterministic=True)
+            action = ppo.policy.eval_predict(obs)
+            # print("action: ",action)
+            obs, reward, _, dones, info = env.step(action)
+            # print("reward: ",reward)
+            # print(obs["images"].shape)
+            rewards += reward
+            array = (obs["images"] * 255).astype(np.uint8)
+            tran_array = []
+            for j in range(len(array)):
+                tran_array.append(np.moveaxis(array[j], 0, -1))
+            con_image = np.hstack(tran_array)
+            # print("con_image.shape",con_image.shape)
+            # print(con_image)
 
+            image_list.append(con_image)
+            if dones:
+                ppo.policy.policy_net.eval_temporal_ensembler.reset()
+                break
 
-    # from visualize_episodes import save_videos
-    # save_path = config["save_dir"]
-    # print(save_path)
-    # save_videos(image_list, dt, video_path=f"{save_path}.mp4", decompress=False)
+        # 视频保存参数
+        fps = config["fps"]
+        # fps = 1
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # 视频编码格式
+
+        print("save_dir",config["save_dir"])
+        # 保存拼接后的图像为视频
+        out = cv2.VideoWriter(config["save_dir"] + f'/result_policy_best_{i}.mp4', fourcc, fps, (con_image.shape[1], con_image.shape[0]))
+        for image in image_list:
+            # print(image.shape)
+            out.write(image)
+        out.release()
+
+        reward_episode.append(rewards)
+
+    env.close()
+    print(reward_episode)
+    print("mean_reward:",np.mean(reward_episode))
+
+    ppo.learn(total_timesteps=1e7,callback=eval_callback)
 
     # # test policy forward
     # ts = env.reset()
