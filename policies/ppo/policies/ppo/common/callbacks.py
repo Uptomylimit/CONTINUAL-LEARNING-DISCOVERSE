@@ -1,5 +1,6 @@
 import os
 import warnings
+
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Callable, Optional, Union
 
@@ -461,16 +462,40 @@ class EvalCallback(EventCallback):
             # Reset success rate buffer
             self._is_success_buffer = []
 
-            episode_rewards, episode_lengths = evaluate_policy(
-                self.model,
-                self.eval_env,
-                n_eval_episodes=self.n_eval_episodes,
-                render=self.render,
-                deterministic=self.deterministic,
-                return_episode_rewards=True,
-                warn=self.warn,
-                callback=self._log_success_callback,
-            )
+            # episode_rewards, episode_lengths = evaluate_policy(
+            #     self.model,
+            #     self.eval_env,
+            #     n_eval_episodes=self.n_eval_episodes,
+            #     render=self.render,
+            #     deterministic=self.deterministic,
+            #     return_episode_rewards=True,
+            #     warn=self.warn,
+            #     callback=self._log_success_callback,
+            # )
+
+            env = self.eval_env.envs[0]
+            episode_rewards = []
+            episode_lengths = []
+            for i in range(self.n_eval_episodes):
+                obs,_ = env.reset()
+                rewards = 0
+                length = 0
+
+                while True:
+                    action = self.model.policy.eval_predict(obs,deterministic=True)
+                    # print("action: ",action)
+                    obs, reward, _, dones, info = env.step(action)
+                    length += 1
+                    # print(obs["images"].shape)
+                    rewards += reward
+                    if dones:
+                        self.model.policy.policy_net.eval_temporal_ensembler.reset()
+                        print("reset eval temporal ensembler")
+                        break
+
+                episode_rewards.append(rewards)
+                episode_lengths.append(length)
+
 
             if self.log_path is not None:
                 assert isinstance(episode_rewards, list)
@@ -712,3 +737,22 @@ class ProgressBarCallback(BaseCallback):
         # Flush and close progress bar
         self.pbar.refresh()
         self.pbar.close()
+
+
+## my callback
+
+class CustomEvalCallback(EvalCallback):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # 标记初始评估是否完成
+        self.is_initial_eval_done = False
+
+    def on_training_start(self, locals_, globals_):
+        super().on_training_start(locals_, globals_)
+        # 训练开始时立即评估一次
+        self._eval_model()
+        self.is_initial_eval_done = True
+
+    def _on_step(self) -> bool:
+        # 原有逻辑：按eval_freq频率评估
+        return super()._on_step()

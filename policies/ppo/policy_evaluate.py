@@ -188,6 +188,12 @@ def eval_bc(env,env_maker, config):
     obs,_ = env.reset()
     # print("reset_obs:",obs["qpos"])
     # print("reset_obs:", obs["images"])
+    array = (obs["images"] * 255).astype(np.uint8)
+    tran_array = []
+    for i in range(len(array)):
+        tran_array.append(np.moveaxis(array[i], 0, -1))
+    con_image = np.hstack(tran_array)
+    image_list.append(con_image)
     rewards = 0
     for _ in range(300):
         action, _states = ppo.predict(obs,deterministic=True)
@@ -213,7 +219,7 @@ def eval_bc(env,env_maker, config):
     # 保存拼接后的图像为视频
     out = cv2.VideoWriter(eval_result_path + '/result_policy_best_0.mp4', fourcc, fps, (con_image.shape[1], con_image.shape[0]))
     for image in image_list:
-        print(image.shape)
+        # print(image.shape)
         out.write(image)
     out.release()
 

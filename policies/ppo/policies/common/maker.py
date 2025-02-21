@@ -26,10 +26,29 @@ def post_init_policies(policies: List[torch.nn.Module], stage, ckpt_paths) -> No
             if not os.path.exists(ckpt_path):
                 raise Exception(f"Checkpoint path does not exist: {ckpt_path}")
             if stage == "train":
-                loading_status = policy.load_state_dict(torch.load(ckpt_path, weights_only=weights_only))
+                load = torch.load(ckpt_path, weights_only=weights_only)
+                # names = []
+                # for name, param in load.items():
+                #     names.append(name)
+                #     # print(f"Values: {param}")
+                # print(names)
+                fixed_state_dict = {k.replace('module.', ''): v for k, v in load.items()}
+
+                loading_status = policy.load_state_dict(fixed_state_dict)
                 logging.info(f'Resume policy from: {ckpt_path}, Status: {loading_status}')
             elif stage == "eval":
-                loading_status = policy.load_state_dict(torch.load(ckpt_path, weights_only=weights_only))
+                load = torch.load(ckpt_path, weights_only=weights_only)
+
+                # names = []
+                # for name, param in load.items():
+                #     names.append(name)
+                #     # print(f"Values: {param}")
+                # print(names)
+
+                # 修改参数键名，移除 'module.' 前缀 由于dataparalell的封装
+                fixed_state_dict = {k.replace('module.', ''): v for k, v in load.items()}
+                    
+                loading_status = policy.load_state_dict(fixed_state_dict)
                 logging.info(loading_status)
                 logging.info(f"Loaded: {ckpt_path}")
         policy.cuda()

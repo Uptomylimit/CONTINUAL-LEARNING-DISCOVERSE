@@ -45,6 +45,15 @@ class DictRolloutBufferSamples(NamedTuple):
     advantages: th.Tensor
     returns: th.Tensor
 
+class DictRolloutBufferSamples_act_tem(NamedTuple):
+    observations: TensorDict
+    actions: th.Tensor
+    raw_actions: th.Tensor
+    old_values: th.Tensor
+    old_log_prob: th.Tensor
+    advantages: th.Tensor
+    returns: th.Tensor
+
 
 class ReplayBufferSamples(NamedTuple):
     observations: th.Tensor

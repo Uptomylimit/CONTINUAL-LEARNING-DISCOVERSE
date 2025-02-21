@@ -123,9 +123,10 @@ class OnPolicyAlgorithm(BaseAlgorithm):
             if isinstance(self.observation_space, spaces.Dict):
                 self.rollout_buffer_class = DictRolloutBuffer
             else:
+                # to do: consider temporal_agg
                 self.rollout_buffer_class = RolloutBuffer
-
         self.rollout_buffer = self.rollout_buffer_class(
+            self.act_policy_config,
             self.n_steps,
             self.observation_space,  # type: ignore[arg-type]
             self.action_space,
@@ -183,7 +184,9 @@ class OnPolicyAlgorithm(BaseAlgorithm):
         :return: True if function returned with at least `n_rollout_steps`
             collected, False if callback terminated rollout prematurely.
         """
+        # print("--------------------")
         assert self._last_obs is not None, "No previous observation was provided"
+        # print("self._last_obs",self._last_obs)
         # Switch to eval mode (this affects batch norm / dropout)
         self.policy.set_training_mode(False)
 
@@ -194,6 +197,7 @@ class OnPolicyAlgorithm(BaseAlgorithm):
             self.policy.reset_noise(env.num_envs)
 
         callback.on_rollout_start()
+        # print("--------------------")
 
         while n_steps < n_rollout_steps:
             if self.use_sde and self.sde_sample_freq > 0 and n_steps % self.sde_sample_freq == 0:
@@ -203,9 +207,19 @@ class OnPolicyAlgorithm(BaseAlgorithm):
             with th.no_grad():
                 # Convert to pytorch tensor or to TensorDict
                 # print("curr_image",self._last_obs["images"])
+                # print("--------------------")
                 obs_tensor = obs_as_tensor(self._last_obs, self.device)
-                actions, values, log_probs = self.policy(obs_tensor)
+                if self.act_policy_config["temporal_agg"]:
+                    actions, raw_actions, values, _ = self.policy(obs_tensor)
+                    # print("--------------------")
+                else:
+                    actions, values, log_probs = self.policy(obs_tensor)
             actions = actions.cpu().numpy()
+            raw_actions = raw_actions.cpu().numpy()
+
+            # print("actions: ",actions)
+            # print("raw_actions: ",raw_actions)
+                
 
             # Rescale and perform action
             clipped_actions = actions
@@ -222,7 +236,11 @@ class OnPolicyAlgorithm(BaseAlgorithm):
             #         # as we are sampling from an unbounded Gaussian distribution
             #         clipped_actions = np.clip(actions, self.action_space.low, self.action_space.high)
 
+            # print("clipped_actions.shape",clipped_actions.shape)
+
             new_obs, rewards, dones, infos = env.step(clipped_actions)
+
+            # print("dones: ",dones)
 
             self.num_timesteps += env.num_envs
 
@@ -240,25 +258,66 @@ class OnPolicyAlgorithm(BaseAlgorithm):
 
             # Handle timeout by bootstrapping with value function
             # see GitHub issue #633
+            # print("dones: ",dones)
             for idx, done in enumerate(dones):
+                # to do reset temporal_agg
+                # print(done,infos)
                 if (
                     done
                     and infos[idx].get("terminal_observation") is not None
                     and infos[idx].get("TimeLimit.truncated", False)
                 ):
-                    terminal_obs = self.policy.obs_to_tensor(infos[idx]["terminal_observation"])[0]
-                    with th.no_grad():
-                        terminal_value = self.policy.predict_values(terminal_obs)[0]  # type: ignore[arg-type]
-                    rewards[idx] += self.gamma * terminal_value
 
-            rollout_buffer.add(
-                self._last_obs,  # type: ignore[arg-type]
-                actions,
-                rewards,
-                self._last_episode_starts,  # type: ignore[arg-type]
-                values,
-                log_probs,
-            )
+                    if not self.act_policy_config["temporal_agg"]:
+                        terminal_obs = self.policy.obs_to_tensor(infos[idx]["terminal_observation"])[0]
+                        with th.no_grad():
+                            terminal_value = self.policy.predict_values(terminal_obs)[0]  # type: ignore[arg-type]
+                        rewards[idx] += self.gamma * terminal_value
+                    else:
+                        ## reset时间集成
+                        ## todo 并行训练的话，好几个环境，如何重置时间集成
+                        print("reset temporal_ensembler!!!!!!!!!!!")
+                        self.policy.policy_net.temporal_ensembler.reset()
+
+            if self.act_policy_config["temporal_agg"]:
+                # print("actions: ",actions.shape,actions)
+                rollout_buffer.add(
+                    self._last_obs,  # type: ignore[arg-type]
+                    new_obs,
+                    actions[:,0],
+                    raw_actions,
+                    rewards,
+                    self._last_episode_starts,  # type: ignore[arg-type]
+                    values,
+                    th.tensor([0]*self.n_envs,dtype=th.float32).to(self.device),
+                )
+
+                if n_steps>=self.act_policy_config["chunk_size"]:
+                    with th.no_grad():
+                        # print("execute action:",rollout_buffer.pos-self.act_policy_config["chunk_size"],rollout_buffer.pos)
+                        # print("execute action: ",rollout_buffer.actions[rollout_buffer.pos-self.act_policy_config["chunk_size"]:rollout_buffer.pos])
+                        execute_actions = th.tensor(rollout_buffer.actions[rollout_buffer.pos-self.act_policy_config["chunk_size"]:rollout_buffer.pos]
+                                                ,dtype=th.float32).to(self.device).reshape(
+                                                    -1,self.act_policy_config["chunk_size"]*self.act_policy_config["action_dim"])
+                        # print(rollout_buffer.observations.shape)
+                        index = rollout_buffer.pos-self.act_policy_config["chunk_size"]
+                        mean_actions = rollout_buffer.raw_actions[index]
+
+                        execute_log_probs = self.policy.compute_log_prob(mean_actions,execute_actions)
+                        rollout_buffer.add_execute_log_prob(execute_log_probs)
+
+                # print("rollout_buffer.log_probs",rollout_buffer.log_probs[:rollout_buffer.pos].squeeze(1))
+
+
+            else:
+                rollout_buffer.add(
+                    self._last_obs,  # type: ignore[arg-type]
+                    actions,
+                    rewards,
+                    self._last_episode_starts,  # type: ignore[arg-type]
+                    values,
+                    log_probs,
+                )
             self._last_obs = new_obs  # type: ignore[assignment]
             self._last_episode_starts = dones
 
@@ -266,7 +325,21 @@ class OnPolicyAlgorithm(BaseAlgorithm):
             # Compute value for the last timestep
             values = self.policy.predict_values(obs_as_tensor(new_obs, self.device))  # type: ignore[arg-type]
 
-        rollout_buffer.compute_returns_and_advantage(last_values=values, dones=dones)
+        if self.act_policy_config["temporal_agg"]:
+
+            rollout_buffer.compute_next_values(self.policy)
+            rollout_buffer.compute_returns_and_advantage_temporal_agg(last_values=values, dones=dones)
+            # print("rollout_buffer")
+            # print("roll_out_buffer_obs",rollout_buffer.observations["qpos"].reshape(rollout_buffer.buffer_size,7))
+            # print("roll_out_buffer_next_obs",rollout_buffer.new_observations["qpos"].reshape(rollout_buffer.buffer_size,7))
+            # print("roll_out_buffer_values",rollout_buffer.values.reshape(-1,rollout_buffer.buffer_size))
+            # print("roll_out_buffer_next_values",rollout_buffer.next_values.reshape(-1,rollout_buffer.buffer_size))
+            # print("roll_out_buffer_rewards",rollout_buffer.rewards.reshape(-1,rollout_buffer.buffer_size))
+            # print("roll_out_buffer_advantages",rollout_buffer.advantages.reshape(-1,rollout_buffer.buffer_size))
+
+        else:
+
+            rollout_buffer.compute_returns_and_advantage(last_values=values, dones=dones)
 
         callback.update_locals(locals())
 
@@ -328,8 +401,9 @@ class OnPolicyAlgorithm(BaseAlgorithm):
 
         while self.num_timesteps < total_timesteps:
             print("self.num_timesteps",self.num_timesteps)
-            continue_training = self.collect_rollouts(self.env, callback, self.rollout_buffer, n_rollout_steps=self.n_steps)
 
+            continue_training = self.collect_rollouts(self.env, callback, self.rollout_buffer, n_rollout_steps=self.n_steps)
+            # print("---------------0.0")
             if not continue_training:
                 break
 

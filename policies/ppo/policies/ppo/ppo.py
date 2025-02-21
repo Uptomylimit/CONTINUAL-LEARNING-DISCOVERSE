@@ -225,13 +225,18 @@ class PPO(OnPolicyAlgorithm):
             # Do a complete pass on the rollout buffer
             for rollout_data in self.rollout_buffer.get(self.batch_size):
                 actions = rollout_data.actions
+                raw_actions = rollout_data.raw_actions
                 if isinstance(self.action_space, spaces.Discrete):
                     # Convert discrete action from float to long
                     actions = rollout_data.actions.long().flatten()
                 
-                # print("--------------------------------")
+                # print("---------------train-----------------")
+                # print("raw_actions",raw_actions)
+                # print("actions",actions)
                 # print(rollout_data.observations["images"].shape)
-                values, log_prob, entropy = self.policy.evaluate_actions(rollout_data.observations, actions)
+                # values, log_prob, entropy = self.policy.evaluate_actions(rollout_data.observations, actions)
+                values, log_prob, entropy = self.policy.evaluate_actions_for_NAN(rollout_data.observations, raw_actions, actions)
+                
                 values = values.flatten()
                 # Normalize advantage
                 advantages = rollout_data.advantages
@@ -241,6 +246,9 @@ class PPO(OnPolicyAlgorithm):
 
                 # ratio between old and new policy, should be one at the first iteration
                 ratio = th.exp(log_prob - rollout_data.old_log_prob)
+                # print("log_prob",log_prob)
+                # print("rollout_data.old_log_prob",rollout_data.old_log_prob)
+                # print("ratio",ratio)
 
                 # clipped surrogate loss
                 policy_loss_1 = advantages * ratio
@@ -275,6 +283,7 @@ class PPO(OnPolicyAlgorithm):
                 entropy_losses.append(entropy_loss.item())
 
                 loss = policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss
+                # loss = self.ent_coef * entropy_loss + self.vf_coef * value_loss
 
                 # Calculate approximate form of reverse KL Divergence for early stopping
                 # see issue #417: https://github.com/DLR-RM/stable-baselines3/issues/417
@@ -297,11 +306,15 @@ class PPO(OnPolicyAlgorithm):
                 # Clip grad norm
                 th.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
                 self.policy.optimizer.step()
+            
 
             self._n_updates += 1
             if not continue_training:
                 break
 
+        print("value_loss",np.mean(value_losses))
+        print("policy_loss",np.mean(pg_losses))
+        
         explained_var = explained_variance(self.rollout_buffer.values.flatten(), self.rollout_buffer.returns.flatten())
 
         # Logs
@@ -320,27 +333,27 @@ class PPO(OnPolicyAlgorithm):
         if self.clip_range_vf is not None:
             self.logger.record("train/clip_range_vf", clip_range_vf)
 
-        action_mean,action_std,qpos_mean,qpos_std = self.get_norm_stats_from_buf()
-        print("----------------")
-        print(action_mean,action_std,qpos_mean,qpos_std)
-        # print("self.env",type(self.env))
-        # print("self.env",self.env.envs.shape)
-        # 更新env中的均值方差参数，也保存于algorithm中
-        self.qpos_mean = self.qpos_mean * (1 - self.ema_alpha) + qpos_mean * self.ema_alpha
-        self.qpos_std = self.qpos_std * (1 - self.ema_alpha) + qpos_std * self.ema_alpha
-        self.action_mean = self.action_mean * (1 - self.ema_alpha) + action_mean * self.ema_alpha
-        self.action_std = self.action_std * (1 - self.ema_alpha) + action_std * self.ema_alpha
-        self.stats = {
-            "action_mean": self.action_mean,
-            "action_std": self.action_std,
-            "qpos_mean": self.qpos_mean,
-            "qpos_std": self.qpos_std,
-        }
-        for i in range(len(self.env.envs)):
-            self.env.envs[i].env.qpos_mean = self.qpos_mean
-            self.env.envs[i].env.qpos_std = self.qpos_std
-            self.env.envs[i].env.action_mean = self.action_mean
-            self.env.envs[i].env.action_std = self.action_std
+        # action_mean,action_std,qpos_mean,qpos_std = self.get_norm_stats_from_buf()
+        # print("----------------")
+        # print(action_mean,action_std,qpos_mean,qpos_std)
+        # # print("self.env",type(self.env))
+        # # print("self.env",self.env.envs.shape)
+        # # 更新env中的均值方差参数，也保存于algorithm中
+        # self.qpos_mean = self.qpos_mean * (1 - self.ema_alpha) + qpos_mean * self.ema_alpha
+        # self.qpos_std = self.qpos_std * (1 - self.ema_alpha) + qpos_std * self.ema_alpha
+        # self.action_mean = self.action_mean * (1 - self.ema_alpha) + action_mean * self.ema_alpha
+        # self.action_std = self.action_std * (1 - self.ema_alpha) + action_std * self.ema_alpha
+        # self.stats = {
+        #     "action_mean": self.action_mean,
+        #     "action_std": self.action_std,
+        #     "qpos_mean": self.qpos_mean,
+        #     "qpos_std": self.qpos_std,
+        # }
+        # for i in range(len(self.env.envs)):
+        #     self.env.envs[i].env.qpos_mean = self.qpos_mean
+        #     self.env.envs[i].env.qpos_std = self.qpos_std
+        #     self.env.envs[i].env.action_mean = self.action_mean
+        #     self.env.envs[i].env.action_std = self.action_std
 
 
         
