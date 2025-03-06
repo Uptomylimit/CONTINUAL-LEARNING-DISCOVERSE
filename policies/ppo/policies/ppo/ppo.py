@@ -170,7 +170,9 @@ class PPO(OnPolicyAlgorithm):
         self.qpos_mean = self.env.envs[0].env.qpos_mean
         self.qpos_std = self.env.envs[0].env.qpos_std
         self.action_mean = self.env.envs[0].env.action_mean
-        self.action_std = self.env.envs[0].env.action_mean
+        self.action_std = self.env.envs[0].env.action_std
+#         self.action_std = np.array([0.20534639, 0.25682452, 0.24897836 ,0.23433977, 0.25095877, 0.7570552,
+#  0.44931987])
         self.stats = {
             "action_mean": self.action_mean,
             "action_std": self.action_std,
@@ -246,9 +248,9 @@ class PPO(OnPolicyAlgorithm):
 
                 # ratio between old and new policy, should be one at the first iteration
                 ratio = th.exp(log_prob - rollout_data.old_log_prob)
-                # print("log_prob",log_prob)
-                # print("rollout_data.old_log_prob",rollout_data.old_log_prob)
-                # print("ratio",ratio)
+                print("log_prob",log_prob)
+                print("rollout_data.old_log_prob",rollout_data.old_log_prob)
+                print("ratio",ratio)
 
                 # clipped surrogate loss
                 policy_loss_1 = advantages * ratio

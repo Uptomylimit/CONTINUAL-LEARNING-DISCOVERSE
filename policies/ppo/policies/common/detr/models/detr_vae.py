@@ -9,6 +9,8 @@ from .backbone import build_backbone
 from .transformer import build_transformer, TransformerEncoder, TransformerEncoderLayer
 import numpy as np
 
+# torch.set_printoptions(threshold=np.inf)
+
 
 def reparametrize(mu, logvar):
     std = logvar.div(2).exp()
@@ -128,12 +130,29 @@ class DETRVAE(nn.Module):
         if self.backbones is not None:
             # Image observation features and position embeddings
             all_cam_features, all_cam_pos = self.encode_images(image)
+            # print("all_Cam_features: ",all_cam_features) # 一致
+            # print("all_Cam_pos: ",all_cam_pos) # 一致
             # proprioception features
             proprio_input = self.input_proj_robot_state(qpos)
+            # print("proprio_input: ",proprio_input) # 一致
             # fold camera dimension into width dimension
             src = torch.cat(all_cam_features, axis=3)
             pos = torch.cat(all_cam_pos, axis=3)
+
+            # for module in self.transformer.modules():
+            #     if isinstance(module, nn.Dropout):
+            #         module.p = 0
+
             hs = self.transformer(src, None, self.query_embed.weight, pos, latent_input, proprio_input, self.additional_pos_embed.weight)[0]
+            
+            # print("self.query_embed.weight",self.query_embed.weight)
+            # print("latent_input",latent_input)
+            # print("pos",pos)
+            # print("proprio_input",proprio_input)
+            # print("self.additional_pos_embed.weight",self.additional_pos_embed.weight)
+            # print("hs: ",hs)
+            # hs = self.transformer(src, None, self.query_embed.weight, pos, latent_input, proprio_input, self.additional_pos_embed.weight)[0]
+            # print("hs: ",hs)
         else:
             qpos = self.input_proj_robot_state(qpos)
             env_state = self.input_proj_env_state(env_state)

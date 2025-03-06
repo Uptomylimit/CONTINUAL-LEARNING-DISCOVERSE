@@ -16,6 +16,7 @@ class ACTPolicy(nn.Module):
         super().__init__()
         if config is None:
             model, self._args = build_ACT_model(args_override)
+            # print("args_override",args_override)
         else:
             model, self._args = build_ACT_YHD_model(config, args_override)
         self.model = model  # CVAE decoder

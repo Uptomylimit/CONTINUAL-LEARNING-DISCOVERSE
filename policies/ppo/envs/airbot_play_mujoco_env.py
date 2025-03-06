@@ -53,10 +53,13 @@ class MujocoEnv(gym.Env):
                                 f'dataset_stats.pkl')
         else:
             print("eval load stats!!!!!")
-            stats_path = os.path.join(os.path.dirname(os.path.dirname(self.env_config["ckpt_dir"])),
-                                self.env_config['load_time_stamp'],
-                                "ckpt",
-                                  f'best_modelmeanstd.pkl')
+            # stats_path = os.path.join(os.path.dirname(os.path.dirname(self.env_config["ckpt_dir"])),
+            #                     self.env_config['load_time_stamp'],
+            #                     "ckpt",
+            #                       f'best_modelmeanstd.pkl')
+            
+            ## 之前的代码存储错了 把std存成mean了，现在固定读取一个
+            stats_path = "/home/sfw/project/pythonproject/CONTINUAL-LEARNING-DISCOVERSE/policies/act/my_ckpt/state4_rl/20250218-220243/state4_rl/20250218-220243/dataset_stats.pkl"
 
         # stats_path = os.path.join(ckpt_dir, f'dataset_stats.pkl') if stats_path == '' else stats_path
         # print(f'Saving stats into {stats_path}...')
@@ -202,6 +205,9 @@ class MujocoEnv(gym.Env):
         get_obs=True,
         sleep_time=0,
     ):
+
+        # print("action_mean:",self.action_mean)
+        # print("action_std:",self.action_std)
 
         if not self.env_config["policy_config"]['temporal_agg']:
 

@@ -125,17 +125,25 @@ class OnPolicyAlgorithm(BaseAlgorithm):
             else:
                 # to do: consider temporal_agg
                 self.rollout_buffer_class = RolloutBuffer
-        self.rollout_buffer = self.rollout_buffer_class(
-            self.act_policy_config,
-            self.n_steps,
-            self.observation_space,  # type: ignore[arg-type]
-            self.action_space,
-            device=self.device,
-            gamma=self.gamma,
-            gae_lambda=self.gae_lambda,
-            n_envs=self.n_envs,
-            **self.rollout_buffer_kwargs,
-        )
+        # print(self.act_policy_config)
+        if "ppo_eval" in self.act_policy_config.keys() and self.act_policy_config["ppo_eval"]:
+            pass
+        else:
+            self.rollout_buffer = self.rollout_buffer_class(
+                self.act_policy_config,
+                self.n_steps,
+                self.observation_space,  # type: ignore[arg-type]
+                self.action_space,
+                device=self.device,
+                gamma=self.gamma,
+                gae_lambda=self.gae_lambda,
+                n_envs=self.n_envs,
+                **self.rollout_buffer_kwargs,
+            )
+        # print("ckpt_path",self.act_policy_config["ckpt_path"])
+
+        # self.act_policy_config["ckpt_path"] = ""
+
         self.policy = self.policy_class(  # type: ignore[assignment]
             self.act_policy_config,
             self.observation_space, self.action_space, self.lr_schedule, use_sde=self.use_sde, **self.policy_kwargs

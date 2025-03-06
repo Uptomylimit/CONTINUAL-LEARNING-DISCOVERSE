@@ -22,9 +22,16 @@ def post_init_policies(policies: List[torch.nn.Module], stage, ckpt_paths) -> No
     # https://pytorch.org/docs/stable/generated/torch.load.html
     weights_only = False
     for policy, ckpt_path in zip(policies, ckpt_paths):
+        # print(policy.state_dict().keys())
+        # print("param origin")
+        # print(policy.state_dict()['model.latent_out_proj.bias'])
+        
+
         if ckpt_path not in [None, ""]:
             if not os.path.exists(ckpt_path):
-                raise Exception(f"Checkpoint path does not exist: {ckpt_path}")
+                print(f"Checkpoint path does not exist: {ckpt_path}")
+                continue
+                # raise Exception(f"Checkpoint path does not exist: {ckpt_path}")
             if stage == "train":
                 load = torch.load(ckpt_path, weights_only=weights_only)
                 # names = []
@@ -32,7 +39,24 @@ def post_init_policies(policies: List[torch.nn.Module], stage, ckpt_paths) -> No
                 #     names.append(name)
                 #     # print(f"Values: {param}")
                 # print(names)
+
+                # fixed_state_dict = {}
+                # for k, v in load.items():
+                #     if 'policy_net.' in k:
+                #         fixed_state_dict[k.replace('policy_net.', '')] = v
+
+                # fixed_state_dict = {k.replace('module.', ''): v for k, v in fixed_state_dict.items()}
+                # print(fixed_state_dict.keys())
+
                 fixed_state_dict = {k.replace('module.', ''): v for k, v in load.items()}
+
+                # print("param in post_init_policies")
+                # print(fixed_state_dict.keys())
+                # print(fixed_state_dict['model.latent_out_proj.bias'])
+
+                # 测试
+                # fixed_state_dict["test_add_p"] = "sssssssss"
+                # fixed_state_dict.pop('model.latent_out_proj.bias')
 
                 loading_status = policy.load_state_dict(fixed_state_dict)
                 logging.info(f'Resume policy from: {ckpt_path}, Status: {loading_status}')

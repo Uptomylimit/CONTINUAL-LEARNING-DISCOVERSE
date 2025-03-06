@@ -35,8 +35,13 @@ def get_args_parser():
                         help="Intermediate size of the feedforward layers in the transformer blocks")
     parser.add_argument('--hidden_dim', default=256, type=int, # will be overridden
                         help="Size of the embeddings (dimension of the transformer)")
-    parser.add_argument('--dropout', default=0.1, type=float,
+    # parser.add_argument('--dropout', default=0.1, type=float,
+    #                     help="Dropout applied in the transformer")
+
+    # dropout设置为0,避免过大随机化导致出现nan
+    parser.add_argument('--dropout', default=0, type=float,
                         help="Dropout applied in the transformer")
+    
     parser.add_argument('--nheads', default=8, type=int, # will be overridden
                         help="Number of attention heads inside the transformer's attentions")
     parser.add_argument('--num_queries', default=400, type=int, # will be overridden
@@ -56,6 +61,8 @@ def build_ACT_model(args_override):
     for k, v in args_override.items():
         setattr(args, k, v)
 
+    # print("args: ",args)
+
     model = build_ACT_model_(args)
     model.cuda()
 
@@ -68,6 +75,8 @@ def build_ACT_YHD_model(config, args_override):
 
     for k, v in args_override.items():
         setattr(args, k, v)
+
+    # print("args: ",args)
 
     model = build_ACT_YHD_model_(config, args)
     model.cuda()

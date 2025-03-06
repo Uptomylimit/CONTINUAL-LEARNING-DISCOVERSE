@@ -123,18 +123,21 @@ def eval_bc(env,env_maker, config):
     # eval_every = 3.14 if config["eval_every"] == 0 else config["eval_every"]
     parallel = config["parallel"]
 
-    # # make policy and load trained policy of act
+    # make policy and load trained policy of act
     # pretrain_path = os.path.join(os.path.dirname(os.path.dirname(os.getcwd())),
-    #                           "policies/" + config['load_policy'],
-    #                           "my_ckpt",
-    #                           config['task_name'],
-    #                           config['load_time_stamp'],
-    #                           config['task_name'],
-    #                           config['load_time_stamp'],
-    #                           "policy_best.ckpt")
+    #                         "policies/ppo",
+    #                         "my_ckpt/ckpt/best_model",
+    #                         "policy.pth")
     
-    # # policy_config["ckpt_path"] = pretrain_path
-    policy_config["ckpt_path"] = ""
+    pretrain_dir = os.path.join(os.path.dirname(os.path.dirname(os.getcwd())),
+                            "policies/ppo",
+                            "my_ckpt/ckpt/2025.2.24/step25000")
+    pretrain_name = "step25000.ckpt"
+    
+    # pretrain_path = "/home/sfw/project/pythonproject/CONTINUAL-LEARNING-DISCOVERSE/policies/act/my_ckpt/state4_rl/20250218-220243/state4_rl/20250218-220243/policy_best.ckpt"
+    # policy_config["ckpt_path"] = pretrain_path
+    policy_config["ckpt_path"] = os.path.join(pretrain_dir,pretrain_name)
+    # policy_config["ckpt_path"] = ""
     # print(f'Loading pretrained policy from {pretrain_path}...')
     # policy = make_policy(policy_config, "train")
 
@@ -159,6 +162,7 @@ def eval_bc(env,env_maker, config):
             raise ValueError(f'Invalid parallel mode: {parallel["mode"]}')
         
     policy_config["stage"] = "train"
+    policy_config["ppo_eval"] = True
 
     # train_env = make_vec_env(env_maker,config, n_envs=1)  # 訓練環境
     eval_env = make_vec_env(env_maker,config, n_envs=1)   # 驗證環境
@@ -167,65 +171,75 @@ def eval_bc(env,env_maker, config):
     #                          log_path=config['ckpt_dir'], eval_freq=40,
     #                          n_eval_episodes=5, deterministic=True, render=False)
     # ppo.learn(total_timesteps=1000,callback=eval_callback)
-    ppo.load(path=os.path.join(os.path.dirname(os.path.dirname(config["ckpt_dir"])),
-                                config['load_time_stamp'],
-                                "ckpt/best_model"),
-            env=eval_env,
-            config=policy_config)
-    
-    eval_result_path = os.path.join(os.getcwd(),
-                            "eval_results",
-                            config['task_name'],
-                            config['load_time_stamp'],
-                            datetime.now().strftime("%Y%m%d-%H%M%S"),
-                            )
-    if not os.path.exists(eval_result_path):
-        os.makedirs(eval_result_path)
-    print(f'Saving results into {eval_result_path}...')
 
-    image_list = []
-    dt = 1 / config["fps"]
-    obs,_ = env.reset()
-    # print("reset_obs:",obs["qpos"])
-    # print("reset_obs:", obs["images"])
-    array = (obs["images"] * 255).astype(np.uint8)
-    tran_array = []
-    for i in range(len(array)):
-        tran_array.append(np.moveaxis(array[i], 0, -1))
-    con_image = np.hstack(tran_array)
-    image_list.append(con_image)
-    rewards = 0
-    for _ in range(300):
-        action, _states = ppo.predict(obs,deterministic=True)
-        obs, reward, dones, _, info = env.step(action)
-        # print(obs["images"].shape)
-        rewards += reward
+    # ppo.load(path=os.path.join(os.path.dirname(os.path.dirname(config["ckpt_dir"])),
+    #                             config['load_time_stamp'],
+    #                             "ckpt/best_model"),
+    #         env=eval_env,
+    #         config=policy_config)
+    
+    # eval_result_path = os.path.join(os.getcwd(),
+    #                         "eval_results",
+    #                         config['task_name'],
+    #                         config['load_time_stamp'],
+    #                         datetime.now().strftime("%Y%m%d-%H%M%S"),
+    #                         )
+    # if not os.path.exists(eval_result_path):
+    #     os.makedirs(eval_result_path)
+    # print(f'Saving results into {eval_result_path}...')
+
+    import cv2
+    reward_episode = []
+    for i in range(config["eval_episodes"]):
+        image_list = []
+        dt = 1 / config["fps"]
+        obs,_ = env.reset()
+        rewards = 0
         array = (obs["images"] * 255).astype(np.uint8)
         tran_array = []
-        for i in range(len(array)):
-            tran_array.append(np.moveaxis(array[i], 0, -1))
-        con_image = np.hstack(tran_array)
-        # print("con_image.shape",con_image.shape)
-        # print(con_image)
+        for j in range(len(array)):
+            tran_array.append(np.moveaxis(array[j], 0, -1))
+            con_image = np.hstack(tran_array)
+            image_list.append(con_image)
+        for _ in range(config["max_timesteps"]):
+            # action, _states = ppo.predict(obs,deterministic=True)
+            action = ppo.policy.eval_predict(obs)
+            # print("action: ",action)
+            obs, reward, _, dones, info = env.step(action)
+            # print("reward: ",reward)
+            # print(obs["images"].shape)
+            rewards += reward
+            array = (obs["images"] * 255).astype(np.uint8)
+            tran_array = []
+            for j in range(len(array)):
+                tran_array.append(np.moveaxis(array[j], 0, -1))
+            con_image = np.hstack(tran_array)
+            # print("con_image.shape",con_image.shape)
+            # print(con_image)
 
-        image_list.append(con_image)
-        if dones:
-            break
+            image_list.append(con_image)
+            if dones:
+                ppo.policy.policy_net.eval_temporal_ensembler.reset()
+                break
 
-    # 视频保存参数
-    fps = config["fps"]
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # 视频编码格式
+        # 视频保存参数
+        fps = config["fps"]
+        # fps = 1
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # 视频编码格式
 
-    # 保存拼接后的图像为视频
-    out = cv2.VideoWriter(eval_result_path + '/result_policy_best_0.mp4', fourcc, fps, (con_image.shape[1], con_image.shape[0]))
-    for image in image_list:
-        # print(image.shape)
-        out.write(image)
-    out.release()
+        # print("save_dir",config["save_dir"])
+        # 保存拼接后的图像为视频
+        out = cv2.VideoWriter(pretrain_dir + f'/result_policy_best_{i}.mp4', fourcc, fps, (con_image.shape[1], con_image.shape[0]))
+        for image in image_list:
+            # print(image.shape)
+            out.write(image)
+        out.release()
+
+        reward_episode.append(rewards)
 
     env.close()
-
-    print(rewards)
+    print(reward_episode)
+    print("mean_reward:",np.mean(reward_episode))
 
 
 

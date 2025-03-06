@@ -21,6 +21,8 @@ from policies.ppo.common.env_util import make_vec_env
 from policies.ppo.common.evaluation import evaluate_policy
 from policies.ppo.common.callbacks import EvalCallback,CustomEvalCallback
 
+import torch as th
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -216,9 +218,10 @@ def train_bc(env,env_maker, config):
                               config['load_time_stamp'],
                               "policy_best.ckpt")
     
-    policy_config["ckpt_path"] = pretrain_path
-    # policy_config["ckpt_path"] = ""
-    print(f'Loading pretrained policy from {pretrain_path}...')
+    
+    # policy_config["ckpt_path"] = pretrain_path
+    policy_config["ckpt_path"] = ""
+    print(f'Loading pretrained policy from {policy_config["ckpt_path"]}...')
     # policy = make_policy(policy_config, "train")
 
     # # get epoch base
@@ -237,6 +240,12 @@ def train_bc(env,env_maker, config):
                              log_path=config['ckpt_dir'], eval_freq=config['eval_freq'],
                              n_eval_episodes=config['eval_episodes'], deterministic=True, render=False)
 
+    # for module in ppo.policy.policy_net.modules():
+    #     print(module)
+    #     if isinstance(module, th.nn.Dropout):
+    #         module.p = 0
+    #         print(module)
+   
     # set GPU device
     if parallel is not None:
         if parallel["mode"] == "DP":
@@ -285,60 +294,60 @@ def train_bc(env,env_maker, config):
     #         break
     # env.close()
 
-    import cv2
-    reward_episode = []
-    for i in range(config["eval_episodes"]):
-        image_list = []
-        dt = 1 / config["fps"]
-        obs,_ = env.reset()
-        rewards = 0
-        array = (obs["images"] * 255).astype(np.uint8)
-        tran_array = []
-        for j in range(len(array)):
-            tran_array.append(np.moveaxis(array[j], 0, -1))
-            con_image = np.hstack(tran_array)
-            image_list.append(con_image)
-        for _ in range(config["max_timesteps"]):
-            # action, _states = ppo.predict(obs,deterministic=True)
-            action = ppo.policy.eval_predict(obs)
-            # print("action: ",action)
-            obs, reward, _, dones, info = env.step(action)
-            # print("reward: ",reward)
-            # print(obs["images"].shape)
-            rewards += reward
-            array = (obs["images"] * 255).astype(np.uint8)
-            tran_array = []
-            for j in range(len(array)):
-                tran_array.append(np.moveaxis(array[j], 0, -1))
-            con_image = np.hstack(tran_array)
-            # print("con_image.shape",con_image.shape)
-            # print(con_image)
+    # import cv2
+    # reward_episode = []
+    # for i in range(config["eval_episodes"]):
+    #     image_list = []
+    #     dt = 1 / config["fps"]
+    #     obs,_ = env.reset()
+    #     rewards = 0
+    #     array = (obs["images"] * 255).astype(np.uint8)
+    #     tran_array = []
+    #     for j in range(len(array)):
+    #         tran_array.append(np.moveaxis(array[j], 0, -1))
+    #         con_image = np.hstack(tran_array)
+    #         image_list.append(con_image)
+    #     for _ in range(config["max_timesteps"]):
+    #         # action, _states = ppo.predict(obs,deterministic=True)
+    #         action = ppo.policy.eval_predict(obs)
+    #         # print("action: ",action)
+    #         obs, reward, _, dones, info = env.step(action)
+    #         # print("reward: ",reward)
+    #         # print(obs["images"].shape)
+    #         rewards += reward
+    #         array = (obs["images"] * 255).astype(np.uint8)
+    #         tran_array = []
+    #         for j in range(len(array)):
+    #             tran_array.append(np.moveaxis(array[j], 0, -1))
+    #         con_image = np.hstack(tran_array)
+    #         # print("con_image.shape",con_image.shape)
+    #         # print(con_image)
 
-            image_list.append(con_image)
-            if dones:
-                ppo.policy.policy_net.eval_temporal_ensembler.reset()
-                break
+    #         image_list.append(con_image)
+    #         if dones:
+    #             ppo.policy.policy_net.eval_temporal_ensembler.reset()
+    #             break
 
-        # 视频保存参数
-        fps = config["fps"]
-        # fps = 1
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # 视频编码格式
+    #     # 视频保存参数
+    #     fps = config["fps"]
+    #     # fps = 1
+    #     fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # 视频编码格式
 
-        print("save_dir",config["save_dir"])
-        # 保存拼接后的图像为视频
-        out = cv2.VideoWriter(config["save_dir"] + f'/result_policy_best_{i}.mp4', fourcc, fps, (con_image.shape[1], con_image.shape[0]))
-        for image in image_list:
-            # print(image.shape)
-            out.write(image)
-        out.release()
+    #     print("save_dir",config["save_dir"])
+    #     # 保存拼接后的图像为视频
+    #     out = cv2.VideoWriter(config["save_dir"] + f'/result_policy_best_{i}.mp4', fourcc, fps, (con_image.shape[1], con_image.shape[0]))
+    #     for image in image_list:
+    #         # print(image.shape)
+    #         out.write(image)
+    #     out.release()
 
-        reward_episode.append(rewards)
+    #     reward_episode.append(rewards)
 
-    env.close()
-    print(reward_episode)
-    print("mean_reward:",np.mean(reward_episode))
+    # env.close()
+    # print(reward_episode)
+    # print("mean_reward:",np.mean(reward_episode))
 
-    ppo.learn(total_timesteps=1e7,callback=eval_callback)
+    ppo.learn(total_timesteps=1e6,callback=eval_callback)
 
     # # test policy forward
     # ts = env.reset()

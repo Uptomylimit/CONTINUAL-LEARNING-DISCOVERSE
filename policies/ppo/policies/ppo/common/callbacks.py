@@ -1,5 +1,6 @@
 import os
 import warnings
+import cv2
 
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Callable, Optional, Union
@@ -25,7 +26,7 @@ from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.vec_env import DummyVecEnv, VecEnv, sync_envs_normalization
 
 if TYPE_CHECKING:
-    from stable_baselines3.common import base_class
+    from policies.ppo.common import base_class
 
 
 class BaseCallback(ABC):
@@ -481,6 +482,16 @@ class EvalCallback(EventCallback):
                 rewards = 0
                 length = 0
 
+                image_list = []
+                obs,_ = env.reset()
+                rewards = 0
+                array = (obs["images"] * 255).astype(np.uint8)
+                tran_array = []
+                for j in range(len(array)):
+                    tran_array.append(np.moveaxis(array[j], 0, -1))
+                    con_image = np.hstack(tran_array)
+                    image_list.append(con_image)
+
                 while True:
                     action = self.model.policy.eval_predict(obs,deterministic=True)
                     # print("action: ",action)
@@ -488,10 +499,33 @@ class EvalCallback(EventCallback):
                     length += 1
                     # print(obs["images"].shape)
                     rewards += reward
+
+                    array = (obs["images"] * 255).astype(np.uint8)
+                    tran_array = []
+                    for j in range(len(array)):
+                        tran_array.append(np.moveaxis(array[j], 0, -1))
+                    con_image = np.hstack(tran_array)
+                    # print("con_image.shape",con_image.shape)
+                    # print(con_image)
+
+                    image_list.append(con_image)
+
                     if dones:
                         self.model.policy.policy_net.eval_temporal_ensembler.reset()
                         print("reset eval temporal ensembler")
                         break
+                
+                fps = 25
+                fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # 视频编码格式
+
+                print("eval save video!!!!!!!!!!!!!!!!!!!!!!!!!")
+                print(self.best_model_save_path + f"/step{self.num_timesteps}_video_{i}.mp4")
+                # 保存拼接后的图像为视频
+                out = cv2.VideoWriter(self.best_model_save_path + f"/step{self.num_timesteps}_video_{i}.mp4", fourcc, fps, (con_image.shape[1], con_image.shape[0]))
+                for image in image_list:
+                    # print(image.shape)
+                    out.write(image)
+                out.release()
 
                 episode_rewards.append(rewards)
                 episode_lengths.append(length)
@@ -538,6 +572,8 @@ class EvalCallback(EventCallback):
             # Dump log so the evaluation results are printed with the correct timestep
             self.logger.record("time/total_timesteps", self.num_timesteps, exclude="tensorboard")
             self.logger.dump(self.num_timesteps)
+
+            self.model.save(os.path.join(self.best_model_save_path, f"step{self.num_timesteps}_model"))
 
             if mean_reward > self.best_mean_reward:
                 if self.verbose >= 1:

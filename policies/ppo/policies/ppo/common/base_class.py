@@ -596,6 +596,7 @@ class BaseAlgorithm(ABC):
         params = {}
         if isinstance(load_path_or_dict, dict):
             params = load_path_or_dict
+            print("params!!!!!!!!!!!!!!!!")
         else:
             _, params, _ = load_from_zip_file(load_path_or_dict, device=device, load_data=False)
 
@@ -634,7 +635,24 @@ class BaseAlgorithm(ABC):
                 attr.load_state_dict(params[name])  # type: ignore[arg-type]
             else:
                 # Assume attr is th.nn.Module
-                attr.load_state_dict(params[name], strict=exact_match)
+                # attr.load_state_dict(params[name], strict=exact_match)
+                loading_status = attr.load_state_dict(params[name], strict=exact_match)
+                # print("attr",attr)
+                
+                # print(name,params[name])
+                # for n,p in self.policy.named_parameters():
+                #     # print("n",n)
+                #     if n=='policy_net.model.additional_pos_embed.weight':
+                #         print(p)
+                print(params[name].keys())
+                # print("load_state_dict:",name)
+                # print("loading_status: ",loading_status)
+                # print("----------------load parameters---------------")
+                # print(params[name]['policy_net.model.latent_out_proj.bias'])
+                # for n,p in self.policy.named_parameters():
+                #     if n=='policy_net.model.latent_out_proj.bias':
+                #         print(p)
+                
             updated_objects.add(name)
 
         if exact_match and updated_objects != objects_needing_update:
@@ -690,6 +708,8 @@ class BaseAlgorithm(ABC):
             custom_objects=custom_objects,
             print_system_info=print_system_info,
         )
+        # print(path)
+        # print(params['policy']['policy_net.model.additional_pos_embed.weight'])
 
         assert data is not None, "No data found in the saved file"
         assert params is not None, "No params found in the saved file"
@@ -741,6 +761,9 @@ class BaseAlgorithm(ABC):
             _init_setup_model=False,  # type: ignore[call-arg]
         )
 
+        # print("data",data.keys())
+        # print("kwargs",kwargs.keys())
+        data["act_policy_config"] = config
         # load parameters
         model.__dict__.update(data)
         model.__dict__.update(kwargs)
@@ -870,6 +893,10 @@ class BaseAlgorithm(ABC):
 
         # Build dict of state_dicts
         params_to_save = self.get_parameters()
+        # print("--------------------------------------save--------------------------------------")
+        # print("data",data.keys())
+        # print("params_to_save",params_to_save['policy'].keys())
+        # print("pytorch_variables",pytorch_variables)
 
         save_to_zip_file(path, data=data, params=params_to_save, pytorch_variables=pytorch_variables)
         with open(path+'meanstd.pkl', 'wb') as file:

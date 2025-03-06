@@ -27,6 +27,7 @@ class Transformer(nn.Module):
 
         encoder_layer = TransformerEncoderLayer(d_model, nhead, dim_feedforward,
                                                 dropout, activation, normalize_before)
+        # print("encoder_layer: ",encoder_layer)
         encoder_norm = nn.LayerNorm(d_model) if normalize_before else None
         self.encoder = TransformerEncoder(encoder_layer, num_encoder_layers, encoder_norm)
 
@@ -54,6 +55,8 @@ class Transformer(nn.Module):
             src = src.flatten(2).permute(2, 0, 1)
             pos_embed = pos_embed.flatten(2).permute(2, 0, 1).repeat(1, bs, 1)
             query_embed = query_embed.unsqueeze(1).repeat(1, bs, 1)
+            # print("pos_embed:",pos_embed) # 一致
+            # print("query_embed",query_embed) # 一致
             # mask = mask.flatten(1)
 
             additional_pos_embed = additional_pos_embed.unsqueeze(1).repeat(1, bs, 1) # seq, bs, dim
@@ -71,6 +74,9 @@ class Transformer(nn.Module):
 
         tgt = torch.zeros_like(query_embed)
         memory = self.encoder(src, src_key_padding_mask=mask, pos=pos_embed)
+        # print("pos_embed:",pos_embed) # the same
+        # print("src",src) # the same
+        # print("memory:",memory) # 不一样
         hs = self.decoder(tgt, memory, memory_key_padding_mask=mask,
                           pos=pos_embed, query_pos=query_embed)
         hs = hs.transpose(1, 2)
@@ -90,9 +96,17 @@ class TransformerEncoder(nn.Module):
                 pos: Optional[Tensor] = None):
         output = src
 
+        # first = True
         for layer in self.layers:
             output = layer(output, src_mask=mask,
                            src_key_padding_mask=src_key_padding_mask, pos=pos)
+            # if first:
+            #     print("output: ", output)
+            #     first = False
+            
+        # for layer in self.layers:
+        #     print(layer)
+        # print("output: ", output)
 
         if self.norm is not None:
             output = self.norm(output)
@@ -169,9 +183,24 @@ class TransformerEncoderLayer(nn.Module):
                      src_key_padding_mask: Optional[Tensor] = None,
                      pos: Optional[Tensor] = None):
         q = k = self.with_pos_embed(src, pos)
+        # print("q: ",q) # 第一层相同
+        # print("k: ",k)# 第一层相同
         src2 = self.self_attn(q, k, value=src, attn_mask=src_mask,
                               key_padding_mask=src_key_padding_mask)[0]
+        
+        # 同样的输入，经过self.self_attn后的输出不同
+        # print("src in encoder 2 :" ,src2)
+        # src2 = self.self_attn(q, k, value=src, attn_mask=src_mask,
+        #                       key_padding_mask=src_key_padding_mask)[0]
+        # print("src in encoder 22 :" ,src2)
+        
+        # print("src in encoder:" ,src) # 第一层相同，后续不同
+        # print("src in encoder 2 :" ,src2) # 第一层就已经不同
+        # print("dropout1: ",self.dropout1(src2))
+        # print("dropout2: ",self.dropout1(src2))
+        
         src = src + self.dropout1(src2)
+        # print("src in encoder:" ,src) # 第一层就已经不同
         src = self.norm1(src)
         src2 = self.linear2(self.dropout(self.activation(self.linear1(src))))
         src = src + self.dropout2(src2)

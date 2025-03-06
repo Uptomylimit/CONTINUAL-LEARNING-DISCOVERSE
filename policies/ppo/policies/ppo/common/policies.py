@@ -966,6 +966,7 @@ class ACT_ActorCriticPolicy(BasePolicy):
         self._build_mlp_extractor() 
 
         # 导入act预训练策略
+        # print("self.act_policy_config",self.act_policy_config)
         self.policy_net = make_policy(self.act_policy_config, self.act_policy_config['stage'])
 
         # latent_dim_pi = self.mlp_extractor.latent_dim_pi
@@ -1218,7 +1219,7 @@ class ACT_ActorCriticPolicy(BasePolicy):
         entropy = distribution.entropy()
         return values, log_prob, entropy
     
-    def evaluate_actions_for_NAN(self, obs, mean_actions, actions: th.Tensor) -> tuple[th.Tensor, th.Tensor, Optional[th.Tensor]]:
+    def evaluate_actions_for_NAN(self, obs, raw_actions, actions: th.Tensor) -> tuple[th.Tensor, th.Tensor, Optional[th.Tensor]]:
         """
         重新计算meanactions时一直报nan的错，因此考虑直接把推导出来的action保存下来
 
@@ -1248,8 +1249,17 @@ class ACT_ActorCriticPolicy(BasePolicy):
 
         latent_vf = self.mlp_extractor.forward_critic(features)
 
-        # print("self.log_std",self.log_std)
+        obs = {key: th.as_tensor(obs, device=self.device,dtype=th.float32) for (key, obs) in obs.items()}
 
+        print("----------------------------evaluate_actions_for_NAN---------------------------")
+        print("origin:", raw_actions)
+        # print("self.log_std",self.log_std)
+        # print(obs["images"])
+        mean_actions = th.flatten(self.policy_net.no_temporal_agg_calculate(obs["qpos"],obs["images"]),start_dim=1)
+        print("compute:", mean_actions)
+        # # print(obs["images"])
+        mean_actions = th.flatten(self.policy_net.no_temporal_agg_calculate(obs["qpos"],obs["images"]),start_dim=1)
+        print("compute:", mean_actions)
         distribution = self.action_dist.proba_distribution(mean_actions, self.log_std)
 
         # print("self.log_std",self.log_std)
