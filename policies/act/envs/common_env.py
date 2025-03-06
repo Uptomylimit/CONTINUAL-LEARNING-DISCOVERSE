@@ -38,6 +38,7 @@ def get_image(images: dict|List, camera_names, mode=0):
             images = [images]
         for image in images:
             for cam_name in camera_names:
+                cam_name = 'cam' + cam_name
                 assert (
                     cam_name in image
                 ), f"Camera {cam_name} not found in images {image.keys()}"

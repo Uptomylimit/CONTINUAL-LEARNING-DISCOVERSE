@@ -55,6 +55,7 @@ class AIRBOTPlayWithCameraEnv(object):
         for robot in self.robots:
             robot.reset()
             robot.enter_servo_mode()
+            # robot.robot.set_robot_mode("ONLINE_SERVO")
         time.sleep(sleep_time)
         return self._get_obs()
 
@@ -66,7 +67,7 @@ class AIRBOTPlayWithCameraEnv(object):
     ):
         for index, jn in enumerate(self._all_joints_num):
             one_action = action[jn * index : jn * (index + 1)]
-            self.robots[index].send_action(one_action)
+            self.robots[index].send_action(one_action, wait=True)
         time.sleep(sleep_time)
         obs = self._get_obs() if get_obs else None
         return obs
